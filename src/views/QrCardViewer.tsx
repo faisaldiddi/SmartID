@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { X, RotateCw, ShieldCheck, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { CardState } from '../types';
 import { CardRenderer } from '../components/CardRenderer';
+import { CardScaleContainer } from '../components/CardScaleContainer';
+import { CardErrorBoundary } from '../components/CardErrorBoundary';
 import { restoreCardFromPayload } from '../utils/VerificationPayloadService';
 
 interface QrCardViewerProps {
   encodedData?: string;
 }
 
-export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
+const QrCardViewerContent: React.FC<QrCardViewerProps> = ({ encodedData }) => {
   const [cardState, setCardState] = useState<CardState | null>(null);
   const [status, setStatus] = useState<'VALID' | 'EXPIRED' | 'INVALID'>('VALID');
   const [failReason, setFailReason] = useState<string>('');
@@ -76,6 +78,8 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
     };
   }, []);
 
+  const canGoBack = typeof window !== 'undefined' && (window.history.length > 1 || Boolean(window.opener));
+
   const handleClose = useCallback(() => {
     if (typeof window !== 'undefined') {
       if (window.opener) {
@@ -91,10 +95,10 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
   const cardBaseWidth = isLandscape ? 432 : 272;
   const cardBaseHeight = isLandscape ? 272 : 432;
 
-  // Compute proportional scale to fit mobile screen without ANY clipping or layout shifting
-  const horizontalPadding = windowWidth < 480 ? 32 : 56;
-  const availableWidth = Math.min(windowWidth - horizontalPadding, isLandscape ? 440 : 310);
-  const cardScale = Math.max(0.65, Math.min(1.02, availableWidth / cardBaseWidth));
+  // Compute available container width for proportional scaling
+  const horizontalPadding = windowWidth < 480 ? 24 : 48;
+  const maxAllowedWidth = isLandscape ? 440 : 310;
+  const availableWidth = Math.min(windowWidth - horizontalPadding, maxAllowedWidth);
 
   // 1. LOADING STATE
   if (isLoading) {
@@ -145,11 +149,11 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
     );
   }
 
-  const hasBack = !!cardState.hasBack;
+  const hasBack = Boolean(cardState.hasBack);
 
   // 3. READ-ONLY "CARD PREVIEW" MODAL / POPUP
   return (
-    <div className="min-h-screen bg-[#173B2A] text-white flex flex-col items-center justify-center p-3 sm:p-6 select-none">
+    <div className="min-h-screen bg-[#173B2A] text-white flex flex-col items-center justify-center p-3 sm:p-6 select-none box-border">
       
       {/* Small SmartID Brand Mark at top */}
       <div className="text-center mb-3">
@@ -159,9 +163,9 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
       </div>
 
       {/* Main Card Preview Popup Box */}
-      <div className="w-full max-w-md bg-[#FBF9F2] text-[#173B2A] rounded-3xl shadow-2xl border border-[#D4CEBA] overflow-hidden flex flex-col items-center">
+      <div className="w-full max-w-md bg-[#FBF9F2] text-[#173B2A] rounded-3xl shadow-2xl border border-[#D4CEBA] overflow-hidden flex flex-col items-center box-border">
         
-        {/* Header: "Card Preview" + Close "X" */}
+        {/* Header: "Card Preview" + Close "X" (if history available) */}
         <div className="w-full px-5 py-3.5 border-b border-stone-200/80 flex items-center justify-between bg-white/70">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-[#2C4F3A]" />
@@ -169,15 +173,17 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
               Card Preview
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition-all flex items-center justify-center cursor-pointer"
-            aria-label="Close Preview"
-            title="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition-all flex items-center justify-center cursor-pointer"
+              aria-label="Close Preview"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Read-Only Status Banner */}
@@ -195,22 +201,25 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
           )}
         </div>
 
-        {/* The Exact Generated ID Card (Preserving Original Theme & Proportions) */}
-        <div className="w-full px-3 py-3 sm:px-6 flex items-center justify-center overflow-hidden">
-          <div
-            className="rounded-2xl shadow-xl overflow-hidden flex items-center justify-center transition-transform"
-            style={{
-              width: `${cardBaseWidth * cardScale}px`,
-              height: `${cardBaseHeight * cardScale}px`,
-              pointerEvents: 'none', // Strictly unclickable & non-interactive
-            }}
+        {/* The Exact Generated ID Card Scaled Proportionally with Zero Clipping */}
+        <div className="w-full px-3 py-3 sm:px-6 flex items-center justify-center box-border overflow-hidden">
+          <div 
+            className="flex items-center justify-center select-none"
+            style={{ pointerEvents: 'none' }}
           >
-            <CardRenderer
-              cardState={cardState}
-              side={activeSide}
-              scale={cardScale}
-              mode="readonly"
-            />
+            <CardScaleContainer
+              logicalWidth={cardBaseWidth}
+              logicalHeight={cardBaseHeight}
+              availableWidth={availableWidth}
+              className="rounded-2xl shadow-xl overflow-hidden"
+            >
+              <CardRenderer
+                cardState={cardState}
+                side={activeSide}
+                scale={1}
+                mode="readonly"
+              />
+            </CardScaleContainer>
           </div>
         </div>
 
@@ -264,3 +273,9 @@ export const QrCardViewer: React.FC<QrCardViewerProps> = ({ encodedData }) => {
     </div>
   );
 };
+
+export const QrCardViewer: React.FC<QrCardViewerProps> = (props) => (
+  <CardErrorBoundary>
+    <QrCardViewerContent {...props} />
+  </CardErrorBoundary>
+);

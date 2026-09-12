@@ -1586,8 +1586,8 @@ export const DEFAULT_CARD_STATE = {
   },
   signature: {
     url: '',
-    signatoryName: 'Dr. Evelyn Reed',
-    signatoryTitle: 'Authorized Officer',
+    signatoryName: '',
+    signatoryTitle: 'Authorized Signatory',
     showTitle: true,
   },
   header: {

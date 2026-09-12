@@ -1,28 +1,24 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   CardState, 
   CardSide, 
-  Orientation,
   PatternType,
-  CardRenderModel
+  CardRenderModel,
+  CardSnapshot
 } from '../types';
 import { 
-  QrCode, 
-  Shield, 
-  Award, 
   Phone, 
-  Mail, 
   MapPin, 
   Calendar, 
-  Droplet,
-  CheckCircle2,
   Building2
 } from 'lucide-react';
 import { getTemplateById, renderModelToCardState } from '../utils/templateRegistry';
+import { snapshotToCardState } from '../utils/VerificationPayloadService';
+import { fitTextToBounds } from '../utils/textBounds';
 
 export interface CardRendererProps {
   cardState?: CardState;
-  snapshot?: any;
+  snapshot?: CardSnapshot | any;
   model?: CardRenderModel;
   side?: CardSide;
   scale?: number; // visual scale factor for screen (1 = normal ~432px base width)
@@ -32,37 +28,7 @@ export interface CardRendererProps {
   id?: string;
   onClick?: () => void;
   isPrint?: boolean; // When true, renders with physical mm dimensions (85.6mm x 53.98mm)
-  mode?: 'edit' | 'readonly';
-}
-
-/**
- * Smart Text Auto-Fit Helper:
- * Dynamically scales text down to prevent clipping while allowing natural word wrapping.
- * Solves stress cases like "MOHAMMED ABDUL REHMAN SIDDIQUI" and
- * "MAHATMA HUSSAIN EDUCATIONAL & TECHNOLOGICAL INSTITUTE"
- */
-function fitNameText(name: string) {
-  const len = (name || '').trim().length;
-  if (len <= 14) return { fontSize: '16px', lineHeight: '18px' };
-  if (len <= 20) return { fontSize: '13.5px', lineHeight: '15px' };
-  if (len <= 28) return { fontSize: '11px', lineHeight: '13px' };
-  if (len <= 38) return { fontSize: '9.5px', lineHeight: '11.5px' };
-  return { fontSize: '8.5px', lineHeight: '10px' };
-}
-
-function fitOrgText(org: string) {
-  const len = (org || '').trim().length;
-  if (len <= 18) return { fontSize: '12px', lineHeight: '14px' };
-  if (len <= 28) return { fontSize: '10px', lineHeight: '12px' };
-  if (len <= 45) return { fontSize: '8.5px', lineHeight: '10px' };
-  return { fontSize: '7.5px', lineHeight: '9px' };
-}
-
-function fitDetailText(text: string) {
-  const len = (text || '').trim().length;
-  if (len <= 20) return { fontSize: '8.5px', lineHeight: '10.5px' };
-  if (len <= 32) return { fontSize: '7.5px', lineHeight: '9px' };
-  return { fontSize: '6.8px', lineHeight: '8px' };
+  mode?: 'studio' | 'readonly' | 'export' | 'print';
 }
 
 function getInitials(name: string): string {
@@ -84,8 +50,9 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
   id,
   onClick,
   isPrint = false,
-  mode = 'edit',
 }) => {
+  const [imageError, setImageError] = useState(false);
+
   // Single canonical CardState source
   const cardState = useMemo(() => {
     if (model) {
@@ -95,9 +62,11 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
       return rawCardState;
     }
     if (snapshot) {
-      return snapshot;
+      if ('details' in snapshot && 'header' in snapshot) {
+        return snapshot as CardState;
+      }
+      return snapshotToCardState(snapshot);
     }
-    // Fallback template
     return renderModelToCardState({} as any);
   }, [model, rawCardState, snapshot]);
 
@@ -106,10 +75,9 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
     orientation,
     details,
     photoUrl,
-    photoZoom,
-    photoRotate,
+    photoZoom = 100,
+    photoRotate = 0,
     primaryLogo,
-    secondaryLogo,
     signature,
     header,
     footer,
@@ -128,11 +96,23 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
   const baseWidth = isLandscape ? 432 : 272;
   const baseHeight = isLandscape ? 272 : 432;
 
-  // Smart text fitting calculations
-  const nameStyle = useMemo(() => fitNameText(details.fullName || 'FULL NAME'), [details.fullName]);
-  const orgStyle = useMemo(() => fitOrgText(header.orgName || 'ORGANIZATION NAME'), [header.orgName]);
-  const deptStyle = useMemo(() => fitDetailText(details.department || ''), [details.department]);
-  const desigStyle = useMemo(() => fitDetailText(details.designation || ''), [details.designation]);
+  // Smart text fitting calculations to eliminate text clipping on any name or org length
+  const nameStyle = useMemo(
+    () => fitTextToBounds(details.fullName || 'FULL NAME', { maxFontSize: 15, minFontSize: 8.5, maxCharsPerLine: 20 }),
+    [details.fullName]
+  );
+  const orgStyle = useMemo(
+    () => fitTextToBounds(header.orgName || 'ORGANIZATION NAME', { maxFontSize: 11.5, minFontSize: 7.5, maxCharsPerLine: 26 }),
+    [header.orgName]
+  );
+  const deptStyle = useMemo(
+    () => fitTextToBounds(details.department || '', { maxFontSize: 8.5, minFontSize: 6.5, maxCharsPerLine: 28 }),
+    [details.department]
+  );
+  const desigStyle = useMemo(
+    () => fitTextToBounds(details.designation || 'STAFF', { maxFontSize: 8, minFontSize: 6.2, maxCharsPerLine: 26 }),
+    [details.designation]
+  );
 
   // Photo shape from template archetype
   const photoShapeClass = useMemo(() => {
@@ -211,6 +191,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
             style={{ backgroundColor: colors.accent }}
           />
         );
+      case 'solid':
       default:
         return null;
     }
@@ -223,27 +204,27 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
       // LANDSCAPE FRONT LAYOUT (CR80 Standard)
       // ==========================================
       return (
-        <div className="w-full h-full flex flex-col justify-between overflow-hidden relative">
+        <div className="w-full h-full flex flex-col justify-between overflow-hidden relative box-border">
           
           {/* Header Bar */}
           <div 
-            className="px-3.5 py-2 flex items-center justify-between border-b relative z-10 min-h-[44px]"
+            className="px-3 py-1.5 flex items-center justify-between border-b relative z-10 min-h-[42px] box-border"
             style={{ 
               backgroundColor: header.bgColor || colors.headerBg,
               borderColor: `${colors.accent}40`,
               color: header.textColor || colors.textLight,
             }}
           >
-            <div className="flex items-center gap-2.5 flex-1 min-w-0 pr-2">
-              {header.showLogo && primaryLogo.url ? (
+            <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
+              {header.showLogo && primaryLogo?.url ? (
                 <img 
                   src={primaryLogo.url} 
                   alt="Logo" 
-                  className="h-8 w-auto object-contain max-w-[70px] flex-shrink-0"
+                  className="h-7 w-auto object-contain max-w-[65px] flex-shrink-0"
                 />
               ) : (
                 <div 
-                  className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shadow-sm flex-shrink-0"
+                  className="w-6.5 h-6.5 rounded-lg flex items-center justify-center font-black text-xs shadow-sm flex-shrink-0"
                   style={{ backgroundColor: colors.secondary, color: colors.textLight }}
                 >
                   {header.orgName ? header.orgName.charAt(0) : 'ID'}
@@ -263,7 +244,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                   {header.orgName || 'ORGANIZATION NAME'}
                 </span>
                 {header.showSubtitle && header.subtitle && (
-                  <span className="text-[8px] opacity-85 font-medium leading-none truncate max-w-[240px] mt-0.5">
+                  <span className="text-[7.5px] opacity-85 font-medium leading-none truncate max-w-[200px] mt-0.5">
                     {header.subtitle}
                   </span>
                 )}
@@ -272,7 +253,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {header.showTagline && header.tagline && (
               <span 
-                className="text-[7.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex-shrink-0"
+                className="text-[7px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex-shrink-0 max-w-[120px] truncate"
                 style={{ 
                   backgroundColor: `${colors.accent}20`,
                   borderColor: `${colors.accent}60`,
@@ -285,14 +266,14 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           </div>
 
           {/* Main Body Grid */}
-          <div className="flex-1 px-3.5 py-1.5 flex items-center gap-3 relative z-10">
+          <div className="flex-1 px-3 py-1 flex items-center gap-2.5 relative z-10 box-border min-h-0">
             {/* Left Photo Column */}
             <div className="flex flex-col items-center gap-1 flex-shrink-0">
               <div 
-                className={`w-20 h-24 overflow-hidden border-2 shadow-sm relative bg-stone-100 flex items-center justify-center ${photoShapeClass}`}
+                className={`w-19 h-23 overflow-hidden border-2 shadow-sm relative bg-stone-100 flex items-center justify-center ${photoShapeClass}`}
                 style={{ borderColor: colors.secondary }}
               >
-                {photoUrl ? (
+                {photoUrl && !imageError ? (
                   <img
                     src={photoUrl}
                     alt={details.fullName}
@@ -300,6 +281,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                     style={{
                       transform: `scale(${photoZoom / 100}) rotate(${photoRotate}deg)`,
                     }}
+                    onError={() => setImageError(true)}
                   />
                 ) : (
                   <div 
@@ -307,19 +289,19 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                     style={{ backgroundColor: `${colors.primary}15` }}
                   >
                     <div 
-                      className="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shadow-xs mb-1"
+                      className="w-9 h-9 rounded-full flex items-center justify-center font-black text-xs shadow-xs mb-1"
                       style={{ backgroundColor: colors.primary, color: colors.textLight }}
                     >
                       {getInitials(details.fullName)}
                     </div>
-                    <span className="text-[7.5px] font-bold uppercase tracking-wider text-stone-500">Verified ID</span>
+                    <span className="text-[7px] font-bold uppercase tracking-wider text-stone-500">Verified ID</span>
                   </div>
                 )}
               </div>
               
               {/* ID Tag below photo */}
               <div 
-                className="text-[8.5px] font-mono font-bold tracking-tight px-1.5 py-0.5 rounded border text-center"
+                className="text-[8px] font-mono font-bold tracking-tight px-1.5 py-0.5 rounded border text-center max-w-[80px] truncate"
                 style={{ 
                   backgroundColor: `${colors.primary}15`, 
                   color: colors.primary,
@@ -332,7 +314,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {/* Middle Details Column: Smart Auto-Fit Name & Department */}
             <div className="flex-1 flex flex-col justify-center min-w-0 pr-1">
-              <div className="mb-1">
+              <div className="mb-0.5">
                 <h3 
                   className="font-black tracking-tight uppercase break-words"
                   style={{ 
@@ -346,7 +328,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
                 {details.showDesignation && (
                   <div 
-                    className="inline-block font-bold uppercase tracking-wide px-2 py-0.5 rounded-md mt-0.5 break-words max-w-full"
+                    className="inline-block font-bold uppercase tracking-wide px-1.5 py-0.2 rounded mt-0.5 break-words max-w-full"
                     style={{ 
                       backgroundColor: colors.primary, 
                       color: colors.textLight,
@@ -360,10 +342,10 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
               </div>
 
               {/* Personnel Attributes Grid */}
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[8.5px] mt-0.5">
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[8px] mt-0.5">
                 {details.showDepartment && details.department && (
                   <div className="col-span-2">
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Dept</span>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">Dept</span>
                     <span 
                       className="font-bold block leading-tight break-words" 
                       style={{ 
@@ -379,15 +361,15 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
                 {details.showBloodGroup && details.bloodGroup && (
                   <div>
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Blood</span>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">Blood</span>
                     <span className="font-bold text-red-700 block leading-tight">{details.bloodGroup}</span>
                   </div>
                 )}
 
                 {details.showValidity && details.validUntil && (
                   <div>
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Valid Thru</span>
-                    <span className="font-semibold block leading-tight" style={{ color: colors.textDark }}>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">Valid Thru</span>
+                    <span className="font-semibold block leading-tight truncate" style={{ color: colors.textDark }}>
                       {details.validUntil}
                     </span>
                   </div>
@@ -395,7 +377,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
                 {details.showPhone && details.phone && (
                   <div className="col-span-2">
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Phone</span>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">Phone</span>
                     <span className="font-semibold block leading-tight truncate" style={{ color: colors.textDark }}>
                       {details.phone}
                     </span>
@@ -404,8 +386,8 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
                 {details.showAddress && details.address && (
                   <div className="col-span-2">
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Address / Location</span>
-                    <span className="font-semibold block leading-tight break-words" style={{ color: colors.textDark }}>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">Location</span>
+                    <span className="font-semibold block leading-tight truncate" style={{ color: colors.textDark }}>
                       {details.address}
                     </span>
                   </div>
@@ -414,8 +396,8 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                 {/* Custom Fields (e.g. Aadhaar, Ward, Location) */}
                 {details.customFields && details.customFields.filter((f) => f.enabled && f.value).map((f) => (
                   <div key={f.id} className="col-span-2">
-                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">{f.label}</span>
-                    <span className="font-semibold block leading-tight break-words" style={{ color: colors.textDark }}>
+                    <span className="text-[6.5px] uppercase font-bold text-stone-400 block leading-none">{f.label}</span>
+                    <span className="font-semibold block leading-tight truncate" style={{ color: colors.textDark }}>
                       {f.value}
                     </span>
                   </div>
@@ -423,11 +405,11 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
               </div>
             </div>
 
-            {/* QR Code on far right: Square, Unclipped */}
+            {/* QR Code on far right: Square, Unclipped, Respects 2.5mm safe margin */}
             {qr.enabled && qrDataUrl && (
-              <div className="flex flex-col items-center justify-center p-1 bg-white rounded-lg border border-stone-200 shadow-sm flex-shrink-0">
-                <img src={qrDataUrl} alt="QR Code" className="w-13 h-13 object-contain" />
-                <span className="text-[6px] font-mono uppercase text-stone-500 mt-0.5">VERIFY</span>
+              <div className="flex flex-col items-center justify-center p-1 bg-white rounded-lg border border-stone-200 shadow-sm flex-shrink-0 mr-1">
+                <img src={qrDataUrl} alt="QR Code" className="w-12 h-12 object-contain" />
+                <span className="text-[5.5px] font-mono uppercase text-stone-500 mt-0.5">VERIFY</span>
               </div>
             )}
           </div>
@@ -435,17 +417,17 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           {/* Footer Bar */}
           {footer.enabled && (
             <div 
-              className="px-3 py-1 flex items-center justify-between text-[7.5px] border-t relative z-10"
+              className="px-3 py-1 flex items-center justify-between text-[7px] border-t relative z-10 box-border"
               style={{ 
                 backgroundColor: footer.bgColor || colors.footerBg,
                 color: colors.textDark,
                 borderColor: `${colors.primary}20` 
               }}
             >
-              <span className="truncate max-w-[280px] opacity-85">
+              <span className="truncate max-w-[260px] opacity-85">
                 {footer.text || 'Official Identification Credential'}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <span className="font-mono font-bold tracking-wider">{details.uniqueId}</span>
               </div>
             </div>
@@ -458,25 +440,25 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
     // PORTRAIT FRONT LAYOUT (CR80 Standard)
     // ==========================================
     return (
-      <div className="w-full h-full flex flex-col justify-between overflow-hidden relative">
+      <div className="w-full h-full flex flex-col justify-between overflow-hidden relative box-border">
         {/* Top Header */}
         <div 
-          className="px-3 pt-2.5 pb-1.5 text-center relative z-10 border-b"
+          className="px-3 pt-2 pb-1 text-center relative z-10 border-b box-border"
           style={{ 
             backgroundColor: header.bgColor || colors.headerBg,
             borderColor: `${colors.accent}40`,
             color: header.textColor || colors.textLight,
           }}
         >
-          {header.showLogo && primaryLogo.url ? (
+          {header.showLogo && primaryLogo?.url ? (
             <img 
               src={primaryLogo.url} 
               alt="Logo" 
-              className="h-7 w-auto object-contain mx-auto mb-1 max-w-[90px]"
+              className="h-6 w-auto object-contain mx-auto mb-0.5 max-w-[80px]"
             />
           ) : (
             <div 
-              className="w-6 h-6 rounded-lg mx-auto mb-1 flex items-center justify-center font-black text-[11px] shadow-sm"
+              className="w-5.5 h-5.5 rounded-lg mx-auto mb-0.5 flex items-center justify-center font-black text-[10px] shadow-sm"
               style={{ backgroundColor: colors.secondary, color: colors.textLight }}
             >
               {header.orgName ? header.orgName.charAt(0) : 'ID'}
@@ -495,14 +477,14 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           </h2>
 
           {header.showSubtitle && header.subtitle && (
-            <p className="text-[7px] opacity-85 font-medium leading-tight truncate px-1 mt-0.5">
+            <p className="text-[6.5px] opacity-85 font-medium leading-tight truncate px-1 mt-0.5">
               {header.subtitle}
             </p>
           )}
 
           {header.showTagline && header.tagline && (
             <span 
-              className="inline-block text-[6.5px] font-bold uppercase tracking-wider px-2 py-0.2 rounded-full border mt-0.5"
+              className="inline-block text-[6px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-full border mt-0.5 max-w-[180px] truncate"
               style={{ 
                 backgroundColor: `${colors.accent}20`,
                 borderColor: `${colors.accent}60`,
@@ -515,13 +497,13 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
         </div>
 
         {/* Center Photo & Identity */}
-        <div className="flex-1 flex flex-col items-center justify-center px-3 py-1 relative z-10">
+        <div className="flex-1 flex flex-col items-center justify-center px-3 py-1 relative z-10 box-border min-h-0">
           {/* Photo Frame */}
           <div 
-            className={`w-22 h-26 overflow-hidden border-2 shadow-md relative bg-stone-100 flex items-center justify-center mb-1 ${photoShapeClass}`}
+            className={`w-21 h-25 overflow-hidden border-2 shadow-sm relative bg-stone-100 flex items-center justify-center mb-1 ${photoShapeClass}`}
             style={{ borderColor: colors.primary }}
           >
-            {photoUrl ? (
+            {photoUrl && !imageError ? (
               <img
                 src={photoUrl}
                 alt={details.fullName}
@@ -529,6 +511,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                 style={{
                   transform: `scale(${photoZoom / 100}) rotate(${photoRotate}deg)`,
                 }}
+                onError={() => setImageError(true)}
               />
             ) : (
               <div 
@@ -536,12 +519,12 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                 style={{ backgroundColor: `${colors.primary}15` }}
               >
                 <div 
-                  className="w-11 h-11 rounded-full flex items-center justify-center font-black text-base shadow-xs mb-1"
+                  className="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shadow-xs mb-1"
                   style={{ backgroundColor: colors.primary, color: colors.textLight }}
                 >
                   {getInitials(details.fullName)}
                 </div>
-                <span className="text-[7.5px] font-bold uppercase tracking-wider text-stone-500">Verified ID</span>
+                <span className="text-[7px] font-bold uppercase tracking-wider text-stone-500">Verified ID</span>
               </div>
             )}
           </div>
@@ -561,7 +544,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {details.showDesignation && (
               <div 
-                className="inline-block font-bold uppercase tracking-wide px-2 py-0.5 rounded-full mt-0.5 shadow-xs break-words max-w-full"
+                className="inline-block font-bold uppercase tracking-wide px-2 py-0.2 rounded-full mt-0.5 shadow-xs break-words max-w-full"
                 style={{ 
                   backgroundColor: colors.primary, 
                   color: colors.textLight,
@@ -575,9 +558,9 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           </div>
 
           {/* Key-Value Fields */}
-          <div className="w-full mt-1.5 space-y-0.5 text-[8px] border-t border-b py-1 px-1" style={{ borderColor: `${colors.primary}20` }}>
+          <div className="w-full mt-1 space-y-0.5 text-[7.5px] border-t border-b py-0.5 px-1 box-border" style={{ borderColor: `${colors.primary}20` }}>
             <div className="flex justify-between items-center">
-              <span className="text-[7px] font-bold uppercase text-stone-400">ID Number:</span>
+              <span className="text-[6.5px] font-bold uppercase text-stone-400">ID Number:</span>
               <span className="font-mono font-bold" style={{ color: colors.primary }}>
                 {details.uniqueId}
               </span>
@@ -585,8 +568,8 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {details.showDepartment && details.department && (
               <div className="flex justify-between items-center">
-                <span className="text-[7px] font-bold uppercase text-stone-400">Department:</span>
-                <span className="font-semibold truncate max-w-[140px]" style={{ color: colors.textDark }}>
+                <span className="text-[6.5px] font-bold uppercase text-stone-400">Department:</span>
+                <span className="font-semibold truncate max-w-[130px]" style={{ color: colors.textDark }}>
                   {details.department}
                 </span>
               </div>
@@ -594,7 +577,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {details.showBloodGroup && details.bloodGroup && (
               <div className="flex justify-between items-center">
-                <span className="text-[7px] font-bold uppercase text-stone-400">Blood Group:</span>
+                <span className="text-[6.5px] font-bold uppercase text-stone-400">Blood Group:</span>
                 <span className="font-bold text-red-700">
                   {details.bloodGroup}
                 </span>
@@ -603,7 +586,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {details.showValidity && details.validUntil && (
               <div className="flex justify-between items-center">
-                <span className="text-[7px] font-bold uppercase text-stone-400">Valid Thru:</span>
+                <span className="text-[6.5px] font-bold uppercase text-stone-400">Valid Thru:</span>
                 <span className="font-semibold" style={{ color: colors.textDark }}>
                   {details.validUntil}
                 </span>
@@ -612,8 +595,8 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
             {details.showAddress && details.address && (
               <div className="flex justify-between items-center">
-                <span className="text-[7px] font-bold uppercase text-stone-400">Location:</span>
-                <span className="font-semibold truncate max-w-[140px]" style={{ color: colors.textDark }}>
+                <span className="text-[6.5px] font-bold uppercase text-stone-400">Location:</span>
+                <span className="font-semibold truncate max-w-[130px]" style={{ color: colors.textDark }}>
                   {details.address}
                 </span>
               </div>
@@ -622,8 +605,8 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
             {/* Custom Fields (e.g. Aadhaar, Ward, Location) */}
             {details.customFields && details.customFields.filter((f) => f.enabled && f.value).map((f) => (
               <div key={f.id} className="flex justify-between items-center">
-                <span className="text-[7px] font-bold uppercase text-stone-400">{f.label}:</span>
-                <span className="font-semibold truncate max-w-[140px]" style={{ color: colors.textDark }}>
+                <span className="text-[6.5px] font-bold uppercase text-stone-400">{f.label}:</span>
+                <span className="font-semibold truncate max-w-[130px]" style={{ color: colors.textDark }}>
                   {f.value}
                 </span>
               </div>
@@ -633,7 +616,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
         {/* Bottom Bar with QR or Footer */}
         <div 
-          className="px-3 py-1.5 border-t relative z-10 flex items-center justify-between"
+          className="px-3 py-1 border-t relative z-10 flex items-center justify-between box-border"
           style={{ 
             backgroundColor: footer.bgColor || colors.footerBg,
             borderColor: `${colors.primary}20`,
@@ -643,28 +626,33 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           {qr.enabled && qrDataUrl ? (
             <div className="flex items-center gap-1.5">
               <div className="p-0.5 bg-white rounded border border-stone-200">
-                <img src={qrDataUrl} alt="QR Code" className="w-8 h-8 object-contain" />
+                <img src={qrDataUrl} alt="QR Code" className="w-7.5 h-7.5 object-contain" />
               </div>
-              <div className="text-[6.5px] leading-tight opacity-75">
+              <div className="text-[6px] leading-tight opacity-75">
                 <span className="font-bold block">SmartID Verified</span>
                 <span>Scan for ID</span>
               </div>
             </div>
           ) : (
-            <div className="text-[7px] truncate max-w-[170px]">
+            <div className="text-[6.5px] truncate max-w-[150px]">
               {footer.text || 'Official Credential'}
             </div>
           )}
 
-          {footer.showSignature && signature.url ? (
-            <div className="flex flex-col items-end">
-              <img src={signature.url} alt="Signature" className="h-5 w-auto object-contain" />
-              <span className="text-[6px] text-stone-500 font-semibold">{signature.signatoryTitle || 'Signature'}</span>
+          {signature?.signatoryName ? (
+            <div className="flex flex-col items-end text-right">
+              <span className="font-serif italic text-[8.5px] font-bold text-stone-800 leading-none">
+                {signature.signatoryName}
+              </span>
+              <div className="w-12 border-b border-stone-400 my-0.5" />
+              <span className="text-[5.5px] text-stone-500 font-bold uppercase tracking-wider">
+                {signature.signatoryTitle || 'Authorized Signatory'}
+              </span>
             </div>
           ) : (
             <div className="text-right">
-              <div className="w-12 border-b border-stone-400 mb-0.5" />
-              <span className="text-[6px] text-stone-400 uppercase font-semibold">Authorized</span>
+              <div className="w-10 border-b border-stone-400 mb-0.5" />
+              <span className="text-[5.5px] text-stone-400 uppercase font-semibold">Authorized</span>
             </div>
           )}
         </div>
@@ -674,68 +662,199 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
 
   // Back layout content
   const renderBack = () => {
-    return (
-      <div className="w-full h-full flex flex-col justify-between overflow-hidden relative p-3.5">
-        {/* Top Header of Back */}
-        <div 
-          className="pb-1.5 border-b flex items-center justify-between relative z-10"
-          style={{ borderColor: `${colors.primary}30` }}
-        >
-          <div className="flex items-center gap-2">
-            <Building2 className="w-3.5 h-3.5" style={{ color: colors.primary }} />
-            <span className="text-[9.5px] font-extrabold uppercase tracking-tight" style={{ color: colors.textDark }}>
-              {header.orgName || 'ORGANIZATION POLICIES'}
+    const backTerms = cardState.terms || footer.terms || footer.secondaryText;
+    const barcodeCode = cardState.barcodeValue || details.uniqueId;
+    const officerName = signature.signatoryName;
+    const officerTitle = signature.signatoryTitle;
+
+    // Smart auto-fit for back terms text
+    const termsStyle = fitTextToBounds(backTerms || '', { maxFontSize: 7.5, minFontSize: 5.5, maxCharsPerLine: 35 });
+
+    if (isLandscape) {
+      // ==============================================================
+      // LANDSCAPE BACK LAYOUT: Balanced 2-Column Grid (Zero Clipping)
+      // ==============================================================
+      return (
+        <div className="w-full h-full flex flex-col justify-between overflow-hidden relative p-3 box-border">
+          {/* Top Header of Back */}
+          <div 
+            className="pb-1 border-b flex items-center justify-between relative z-10"
+            style={{ borderColor: `${colors.primary}30` }}
+          >
+            <div className="flex items-center gap-1.5 min-w-0 pr-1">
+              <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: colors.primary }} />
+              <span className="text-[9px] font-extrabold uppercase tracking-tight truncate" style={{ color: colors.textDark }}>
+                {header.orgName || 'OFFICIAL CREDENTIAL'}
+              </span>
+            </div>
+            <span className="text-[7.5px] font-mono font-bold flex-shrink-0" style={{ color: colors.primary }}>
+              {details.uniqueId}
             </span>
           </div>
-          <span className="text-[7.5px] font-mono font-bold" style={{ color: colors.primary }}>
+
+          {/* Back Middle Content: 2-Column Grid */}
+          <div className="flex-1 py-1 grid grid-cols-12 gap-2 relative z-10 items-center min-h-0">
+            {/* Left Column: Terms & Conditions */}
+            <div 
+              className="col-span-7 p-2 rounded-lg border text-stone-600 bg-white/75 backdrop-blur-xs flex flex-col justify-center h-full box-border"
+              style={{ borderColor: `${colors.primary}20` }}
+            >
+              <p className="font-bold mb-0.5 text-stone-800 text-[7.5px]">Terms & Conditions:</p>
+              {backTerms ? (
+                <p 
+                  className="leading-snug break-words whitespace-pre-line overflow-hidden"
+                  style={{ fontSize: termsStyle.fontSize, lineHeight: termsStyle.lineHeight }}
+                >
+                  {backTerms}
+                </p>
+              ) : (
+                <p className="text-[6.5px] leading-snug">
+                  This credential is the property of {header.orgName || 'the issuing authority'}. It is non-transferable and must be presented upon official request. If lost or found, please return immediately.
+                </p>
+              )}
+            </div>
+
+            {/* Right Column: Address, Emergency SOS, Expiry */}
+            <div className="col-span-5 flex flex-col justify-center gap-1 text-[7px] text-stone-600">
+              {details.address && (
+                <div className="flex items-start gap-1">
+                  <MapPin className="w-2.5 h-2.5 text-stone-400 mt-0.5 flex-shrink-0" />
+                  <span className="leading-tight break-words text-[6.5px]">{details.address}</span>
+                </div>
+              )}
+
+              {details.emergencyContact && (
+                <div className="flex items-center gap-1">
+                  <Phone className="w-2.5 h-2.5 text-red-500 flex-shrink-0" />
+                  <span className="font-bold text-red-700 text-[6.5px]">
+                    SOS: {details.emergencyContact}
+                  </span>
+                </div>
+              )}
+
+              {details.validUntil && (
+                <div className="flex items-center gap-1">
+                  <Calendar className="w-2.5 h-2.5 text-stone-400 flex-shrink-0" />
+                  <span className="text-[6.5px]">Exp: {details.validUntil}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Back Bottom Bar: Barcode on Left, Signature on Right */}
+          <div 
+            className="pt-1 border-t flex items-center justify-between relative z-10"
+            style={{ borderColor: `${colors.primary}30` }}
+          >
+            {/* Barcode representation */}
+            <div className="flex flex-col items-start">
+              <div className="h-4.5 w-36 flex items-center justify-center gap-[1.5px] bg-white p-0.5 rounded border border-stone-200">
+                {[3,1,2,4,1,3,2,1,4,2,3,1,2,3,1,4,2,1,3,2,4,1,2,3,1,2,4,2,1,3].map((w, idx) => (
+                  <div 
+                    key={idx} 
+                    className="h-full bg-stone-900" 
+                    style={{ width: `${w}px` }} 
+                  />
+                ))}
+              </div>
+              <span className="text-[6px] font-mono tracking-wider text-stone-500 mt-0.2">
+                *{barcodeCode}*
+              </span>
+            </div>
+
+            {/* Signature on Right */}
+            <div className="flex flex-col items-end text-right">
+              {signature.url ? (
+                <img src={signature.url} alt="Signature" className="h-5 w-auto object-contain" />
+              ) : officerName ? (
+                <span className="font-serif italic text-[9px] text-stone-800 font-bold leading-tight">
+                  {officerName}
+                </span>
+              ) : (
+                <span className="text-[6.5px] text-stone-400 italic">Authorized Signature</span>
+              )}
+              <div className="w-16 border-b border-stone-400 my-0.5" />
+              <span className="text-[5.5px] text-stone-500 font-bold uppercase tracking-wider">
+                {officerTitle || 'Authorized Signatory'}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==============================================================
+    // PORTRAIT BACK LAYOUT (Vertical CR80 Standard)
+    // ==============================================================
+    return (
+      <div className="w-full h-full flex flex-col justify-between overflow-hidden relative p-3 box-border">
+        {/* Top Header */}
+        <div 
+          className="pb-1 border-b flex items-center justify-between relative z-10"
+          style={{ borderColor: `${colors.primary}30` }}
+        >
+          <div className="flex items-center gap-1.5 min-w-0 pr-1">
+            <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: colors.primary }} />
+            <span className="text-[8.5px] font-extrabold uppercase tracking-tight truncate" style={{ color: colors.textDark }}>
+              {header.orgName || 'OFFICIAL CREDENTIAL'}
+            </span>
+          </div>
+          <span className="text-[7px] font-mono font-bold flex-shrink-0" style={{ color: colors.primary }}>
             {details.uniqueId}
           </span>
         </div>
 
-        {/* Back Middle Content */}
-        <div className="flex-1 py-1.5 flex flex-col justify-center gap-1.5 relative z-10 text-[7.5px] leading-relaxed">
-          {/* Instructions / Terms */}
+        {/* Middle Content */}
+        <div className="flex-1 py-1.5 flex flex-col justify-center gap-1.5 relative z-10 text-[7px] leading-relaxed min-h-0">
+          {/* Terms & Conditions Box */}
           <div 
-            className="p-2 rounded-lg border text-stone-600 bg-white/70 backdrop-blur-xs"
-            style={{ borderColor: `${colors.primary}15` }}
+            className="p-2 rounded-lg border text-stone-600 bg-white/75 backdrop-blur-xs box-border"
+            style={{ borderColor: `${colors.primary}20` }}
           >
-            <p className="font-bold mb-0.5 text-stone-800 text-[8px]">Terms & Conditions:</p>
-            <p className="text-[7px] leading-snug">
-              1. This credential is the property of the issuing organization and is non-transferable.<br />
-              2. Must be presented upon request by authorized security personnel.<br />
-              3. If lost or damaged, report immediately to the administration office.
-            </p>
+            <p className="font-bold mb-0.5 text-stone-800 text-[7px]">Terms & Conditions:</p>
+            {backTerms ? (
+              <p 
+                className="leading-snug break-words whitespace-pre-line"
+                style={{ fontSize: termsStyle.fontSize, lineHeight: termsStyle.lineHeight }}
+              >
+                {backTerms}
+              </p>
+            ) : (
+              <p className="text-[6px] leading-snug">
+                This credential is the property of {header.orgName || 'the issuing authority'}. It is non-transferable and must be presented upon official request.
+              </p>
+            )}
           </div>
 
           {/* Address & Emergency Info */}
-          <div className="grid grid-cols-2 gap-1.5">
-            {details.showAddress && details.address && (
-              <div className="col-span-2 flex items-start gap-1 text-stone-600">
-                <MapPin className="w-3 h-3 text-stone-400 mt-0.5 flex-shrink-0" />
-                <span className="text-[7px] leading-tight break-words">{details.address}</span>
+          <div className="space-y-1 text-[6.5px]">
+            {details.address && (
+              <div className="flex items-start gap-1 text-stone-600">
+                <MapPin className="w-2.5 h-2.5 text-stone-400 mt-0.5 flex-shrink-0" />
+                <span className="leading-tight break-words">{details.address}</span>
               </div>
             )}
 
-            {details.showEmergencyContact && details.emergencyContact && (
+            {details.emergencyContact && (
               <div className="flex items-center gap-1 text-stone-600">
-                <Phone className="w-3 h-3 text-red-500 flex-shrink-0" />
-                <span className="text-[7px] font-bold text-red-700">
+                <Phone className="w-2.5 h-2.5 text-red-500 flex-shrink-0" />
+                <span className="font-bold text-red-700">
                   SOS: {details.emergencyContact}
                 </span>
               </div>
             )}
 
-            {details.showValidity && details.validUntil && (
+            {details.validUntil && (
               <div className="flex items-center gap-1 text-stone-600">
-                <Calendar className="w-3 h-3 text-stone-400 flex-shrink-0" />
-                <span className="text-[7px]">Expiry: {details.validUntil}</span>
+                <Calendar className="w-2.5 h-2.5 text-stone-400 flex-shrink-0" />
+                <span>Expiry: {details.validUntil}</span>
               </div>
             )}
           </div>
 
           {/* Barcode representation */}
-          <div className="mt-0.5 flex flex-col items-center">
-            <div className="h-5 w-44 flex items-center justify-center gap-[2px] bg-white p-0.5 rounded border border-stone-200">
+          <div className="flex flex-col items-center mt-1">
+            <div className="h-4.5 w-36 flex items-center justify-center gap-[1.5px] bg-white p-0.5 rounded border border-stone-200">
               {[3,1,2,4,1,3,2,1,4,2,3,1,2,3,1,4,2,1,3,2,4,1,2,3,1,2,4,2,1,3].map((w, idx) => (
                 <div 
                   key={idx} 
@@ -744,39 +863,34 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                 />
               ))}
             </div>
-            <span className="text-[6.5px] font-mono tracking-widest text-stone-500 mt-0.5">
-              *{details.uniqueId}*
+            <span className="text-[6px] font-mono tracking-wider text-stone-500 mt-0.2">
+              *{barcodeCode}*
             </span>
           </div>
         </div>
 
-        {/* Back Bottom Signature & QR */}
+        {/* Back Bottom Signature */}
         <div 
-          className="pt-1.5 border-t flex items-end justify-between relative z-10"
+          className="pt-1 border-t flex items-center justify-between relative z-10"
           style={{ borderColor: `${colors.primary}30` }}
         >
-          {qr.enabled && qrDataUrl && (
-            <div className="flex items-center gap-1.5">
-              <img src={qrDataUrl} alt="QR" className="w-8 h-8 object-contain bg-white p-0.5 rounded border border-stone-200" />
-              <div className="text-[6px] text-stone-400 leading-tight">
-                Scan for<br />verification
-              </div>
-            </div>
-          )}
+          <div className="text-[6px] text-stone-400">
+            {footer.text || 'Official Credential'}
+          </div>
 
-          <div className="flex flex-col items-center text-center">
+          <div className="flex flex-col items-end text-right">
             {signature.url ? (
-              <img src={signature.url} alt="Signature" className="h-6 w-auto object-contain" />
+              <img src={signature.url} alt="Signature" className="h-5 w-auto object-contain" />
+            ) : officerName ? (
+              <span className="font-serif italic text-[8.5px] text-stone-800 font-bold">
+                {officerName}
+              </span>
             ) : (
-              <div className="h-5 flex items-center">
-                <span className="font-serif italic text-[10px] text-stone-600">
-                  {signature.signatoryName || 'Authorized Signature'}
-                </span>
-              </div>
+              <span className="text-[6px] text-stone-400 italic">Authorized Signature</span>
             )}
-            <div className="w-20 border-b border-stone-400 mb-0.5" />
-            <span className="text-[6.5px] text-stone-500 font-bold uppercase tracking-wider">
-              {signature.signatoryTitle || 'Authorized Signatory'}
+            <div className="w-14 border-b border-stone-400 my-0.5" />
+            <span className="text-[5.5px] text-stone-500 font-bold uppercase tracking-wider">
+              {officerTitle || 'Authorized Signatory'}
             </span>
           </div>
         </div>
@@ -797,14 +911,14 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           backgroundColor: colors.background,
           borderColor: `${colors.primary}40`,
           fontFamily: fontFamily || 'Plus Jakarta Sans',
-          padding: '2mm', // 2mm internal safe area for print
+          padding: '2mm', // 2mm internal safe area for physical print
           boxSizing: 'border-box',
           pageBreakInside: 'avoid',
           breakInside: 'avoid',
         }}
       >
         {renderPattern(pattern, colors.secondary)}
-        <div className="w-full h-full relative">
+        <div className="w-full h-full relative box-border">
           {side === 'front' ? renderFront() : renderBack()}
         </div>
       </div>
@@ -812,17 +926,19 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
   }
 
   // Standard Screen Preview & High-Res Export Rendering:
+  // Uses inset box-shadow to prevent border clipping issues
   return (
     <div
       id={id}
       onClick={onClick}
-      className={`relative select-none transition-shadow rounded-2xl overflow-hidden shadow-md border ${className}`}
+      className={`relative select-none transition-shadow rounded-2xl overflow-hidden shadow-md ${className}`}
       style={{
         width: `${baseWidth * scale}px`,
         height: `${baseHeight * scale}px`,
         backgroundColor: colors.background,
-        borderColor: `${colors.primary}40`,
+        boxShadow: `inset 0 0 0 1px ${colors.primary}35, 0 4px 6px -1px rgba(0, 0, 0, 0.1)`,
         fontFamily: fontFamily || 'Plus Jakarta Sans',
+        boxSizing: 'border-box',
       }}
     >
       {/* Background patterns */}
@@ -835,6 +951,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
           width: `${baseWidth}px`,
           height: `${baseHeight}px`,
           transform: `scale(${scale})`,
+          boxSizing: 'border-box',
         }}
       >
         {side === 'front' ? renderFront() : renderBack()}

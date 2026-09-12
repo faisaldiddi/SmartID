@@ -27,6 +27,8 @@ export { isLocalhostWithoutPublicUrl, getSmartIdBaseUrl };
  * 3. Uses Error Correction M, dark #000000, light #FFFFFF, margin 4
  * 4. Pure frontend-only, zero backend dependency.
  */
+import { createPortablePhotoThumbnail } from './photoThumbnail';
+
 export async function generateCardQrCode(
   payload: QrDataPayload,
   size: number = 300,
@@ -37,7 +39,15 @@ export async function generateCardQrCode(
   if (payload.customUrl && payload.customUrl.trim().length > 0) {
     targetUrl = payload.customUrl.trim();
   } else if (cardState) {
-    targetUrl = buildQrVerificationUrl(cardState);
+    let thumbnail: string | null = null;
+    if (cardState.photoUrl) {
+      try {
+        thumbnail = await createPortablePhotoThumbnail(cardState.photoUrl, { width: 44, height: 55, quality: 0.5 });
+      } catch {
+        thumbnail = null;
+      }
+    }
+    targetUrl = buildQrVerificationUrl(cardState, thumbnail || undefined);
   } else {
     const baseUrl = getSmartIdBaseUrl();
     const params = new URLSearchParams();

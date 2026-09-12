@@ -107,6 +107,7 @@ export interface FooterConfig {
   bgColor?: string;
   textColor?: string;
   preset: string;
+  terms?: string;
 }
 
 export interface SignatureConfig {
@@ -183,6 +184,8 @@ export interface CardState {
   fontFamily: string;
   pattern: PatternType;
   barcode?: any;
+  barcodeValue?: string;
+  terms?: string;
   customTemplateName?: string;
 }
 
@@ -249,4 +252,4 @@ export interface PrintCalibration {
   cardSide: 'front' | 'back' | 'both';
   copies: number;
 }
-
+export type { CardSnapshot } from '../utils/VerificationPayloadService';

@@ -39,6 +39,7 @@ import { CardRenderer } from '../components/CardRenderer';
 import { generateFormattedId, getRandomId, IdGeneratorConfig } from '../utils/idGenerator';
 import { generateCardQrCode } from '../utils/qrGenerator';
 import { buildQrVerificationUrl, isLocalhostWithoutPublicUrl, getSmartIdBaseUrl } from '../utils/VerificationPayloadService';
+import { createPortablePhotoThumbnail } from '../utils/photoThumbnail';
 import { saveDesign } from '../utils/storage';
 import { optimizeImage } from '../utils/imageOptimizer';
 import { PdfExportService } from '../utils/PdfExportService';
@@ -131,6 +132,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
     cardState.pattern,
     cardState.qr.enabled,
     cardState.qr.customText,
+    cardState.terms,
+    cardState.barcodeValue,
+    cardState.footer.text,
+    cardState.footer.terms,
+    cardState.signature.signatoryName,
+    cardState.signature.signatoryTitle,
+    cardState.details.address,
+    cardState.details.emergencyContact,
+    cardState.details.customFields,
+    cardState.photoUrl,
   ]);
 
   const handleRegenerateQr = async () => {
@@ -1220,6 +1231,39 @@ export const EditorView: React.FC<EditorViewProps> = ({
                     className="w-full px-3.5 py-2 rounded-xl border border-[#D4CEBA] bg-white text-xs"
                   />
                 </div>
+
+                <div className="pt-2 border-t border-[#D4CEBA]">
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-[#59645C] mb-1">
+                    Back Side Terms & Conditions / Instructions
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={cardState.terms || cardState.footer.terms || ''}
+                    onChange={(e) => onUpdateCardState((prev) => ({
+                      ...prev,
+                      terms: e.target.value,
+                      footer: { ...prev.footer, terms: e.target.value },
+                    }))}
+                    placeholder="e.g. 1. Non-transferable. 2. Report if lost to admin. 3. Valid with photo ID."
+                    className="w-full px-3.5 py-2 rounded-xl border border-[#D4CEBA] bg-white text-xs leading-relaxed resize-none"
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-[#D4CEBA]">
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-[#59645C] mb-1">
+                    Back Barcode Value / Alternate ID (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={cardState.barcodeValue || ''}
+                    onChange={(e) => onUpdateCardState((prev) => ({
+                      ...prev,
+                      barcodeValue: e.target.value,
+                    }))}
+                    placeholder="e.g. 000039947 or custom scan code"
+                    className="w-full px-3.5 py-2 rounded-xl border border-[#D4CEBA] bg-white text-xs font-mono"
+                  />
+                </div>
               </div>
             )}
 
@@ -1339,8 +1383,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
                         <div className="flex items-center gap-2 w-full pt-1">
                           <button
                             type="button"
-                            onClick={() => {
-                              const verifyUrl = buildQrVerificationUrl(cardState);
+                            onClick={async () => {
+                              let thumbnail: string | null = null;
+                              if (cardState.photoUrl) {
+                                try {
+                                  thumbnail = await createPortablePhotoThumbnail(cardState.photoUrl, { width: 44, height: 55, quality: 0.5 });
+                                } catch {
+                                  thumbnail = null;
+                                }
+                              }
+                              const verifyUrl = buildQrVerificationUrl(cardState, thumbnail || undefined);
                               window.open(verifyUrl, '_blank');
                               onShowToast('Opened Verification Portal', 'info');
                             }}
@@ -1351,8 +1403,16 @@ export const EditorView: React.FC<EditorViewProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              const verifyUrl = buildQrVerificationUrl(cardState);
+                            onClick={async () => {
+                              let thumbnail: string | null = null;
+                              if (cardState.photoUrl) {
+                                try {
+                                  thumbnail = await createPortablePhotoThumbnail(cardState.photoUrl, { width: 44, height: 55, quality: 0.5 });
+                                } catch {
+                                  thumbnail = null;
+                                }
+                              }
+                              const verifyUrl = buildQrVerificationUrl(cardState, thumbnail || undefined);
                               navigator.clipboard.writeText(verifyUrl);
                               onShowToast('Copied Verification URL to clipboard!', 'success');
                             }}

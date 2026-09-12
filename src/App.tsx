@@ -225,7 +225,8 @@ export default function App() {
     // Seamlessly open dedicated print window in standalone tab where browser print is guaranteed.
     const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
     if (isInIframe) {
-      const printUrl = `${window.location.origin}/?view=print&autoprint=true`;
+      const base = import.meta.env.BASE_URL || '/';
+      const printUrl = `${window.location.origin}${base}?view=print&autoprint=true`;
       window.open(printUrl, '_blank');
       showToast('Opened Print Window in new tab for direct printing!', 'success');
       return;
@@ -296,7 +297,8 @@ export default function App() {
         onOpenStudio={() => {
           setVerificationPayload(null);
           if (typeof window !== 'undefined' && window.history) {
-            window.history.replaceState({}, document.title, window.location.pathname);
+            const base = import.meta.env.BASE_URL || '/';
+            window.history.replaceState({}, document.title, `${base}#/studio`);
           }
           setActiveTab('editor');
         }}
@@ -312,7 +314,8 @@ export default function App() {
         onBack={() => {
           setIsStandalonePrint(false);
           if (typeof window !== 'undefined' && window.history) {
-            window.history.replaceState({}, document.title, window.location.pathname);
+            const base = import.meta.env.BASE_URL || '/';
+            window.history.replaceState({}, document.title, `${base}#/studio`);
           }
         }}
       />

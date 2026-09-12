@@ -93,7 +93,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
   const handleOpenPrintTab = () => {
     setPrintTarget(cardState);
-    const printUrl = `${window.location.origin}/?view=print&autoprint=true`;
+    const base = import.meta.env.BASE_URL || '/';
+    const printUrl = `${window.location.origin}${base}?view=print&autoprint=true`;
     window.open(printUrl, '_blank');
     onShowToast('Opened standalone print view in new tab', 'info');
   };

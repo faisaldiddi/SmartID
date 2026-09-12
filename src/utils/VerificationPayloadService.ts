@@ -42,9 +42,11 @@ export function getSmartIdBaseUrl(): string {
     return envUrl.trim().replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined') {
-    return window.location.origin;
+    // If running in browser on localhost without env var, use current origin + BASE_URL
+    const base = ((import.meta as any).env?.BASE_URL || '/').replace(/\/+$/, '');
+    return `${window.location.origin}${base}`;
   }
-  return 'https://smartid.vercel.app';
+  return 'https://faisaldiddi.me/SmartID';
 }
 
 /**

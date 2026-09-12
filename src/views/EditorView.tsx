@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   CreditCard, 
   RotateCw, 
@@ -84,7 +84,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
     sequenceNumber: 1042,
   });
 
-  // Re-generate interactive QR Code and publish credential whenever cardState changes
+  const [isQrRegenerating, setIsQrRegenerating] = useState<boolean>(false);
+  const [hasCardDetailsChanged, setHasCardDetailsChanged] = useState<boolean>(false);
+  const initialCardRef = useRef<string>(JSON.stringify(cardState));
+
+  // Re-generate interactive QR Code and publish credential whenever verification-relevant cardState changes (350ms debounce)
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(async () => {
@@ -93,25 +97,49 @@ export const EditorView: React.FC<EditorViewProps> = ({
         return;
       }
 
-      const payload = {
-        org: cardState.header.orgName,
-        name: cardState.qr.includeName ? cardState.details.fullName : undefined,
-        id: cardState.qr.includeId ? cardState.details.uniqueId : undefined,
-        department: cardState.qr.includeDepartment ? cardState.details.department : undefined,
-        customText: cardState.qr.customText || undefined,
-      };
-
-      const url = await generateCardQrCode(payload, 180, cardState);
+      setIsQrRegenerating(true);
+      const url = await generateCardQrCode({}, 180, cardState);
       if (isMounted) {
         setQrDataUrl(url);
+        setIsQrRegenerating(false);
+        if (initialCardRef.current !== JSON.stringify(cardState)) {
+          setHasCardDetailsChanged(true);
+        }
       }
-    }, 250);
+    }, 350);
 
     return () => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [cardState]);
+  }, [
+    cardState.details.fullName,
+    cardState.details.uniqueId,
+    cardState.header.orgName,
+    cardState.details.department,
+    cardState.details.designation,
+    cardState.details.validUntil,
+    cardState.templateId,
+    cardState.orientation,
+    cardState.colors.primary,
+    cardState.colors.secondary,
+    cardState.colors.accent,
+    cardState.colors.textLight,
+    cardState.fontFamily,
+    cardState.header.preset,
+    cardState.footer.preset,
+    cardState.pattern,
+    cardState.qr.enabled,
+    cardState.qr.customText,
+  ]);
+
+  const handleRegenerateQr = async () => {
+    setIsQrRegenerating(true);
+    const url = await generateCardQrCode({}, 180, cardState);
+    setQrDataUrl(url);
+    setIsQrRegenerating(false);
+    onShowToast('Regenerated QR code from current card state!', 'success');
+  };
 
   // Handle updates to card details
   const updateDetails = (field: keyof CardState['details'], value: any) => {
@@ -1287,6 +1315,25 @@ export const EditorView: React.FC<EditorViewProps> = ({
                             QR scanning from another device requires SmartID to be deployed (e.g. Vercel) or a public URL configured via <code className="font-mono bg-amber-100 px-1 rounded">VITE_PUBLIC_SMARTID_URL</code>.
                           </div>
                         )}
+
+                        {/* Card Details Changed Notice (Level 1 Snapshot Constraint) */}
+                        {hasCardDetailsChanged && (
+                          <div className="w-full bg-amber-50 border border-amber-300 text-amber-900 p-2.5 rounded-xl text-[11px] leading-relaxed text-center">
+                            <span className="font-bold block mb-0.5">⚠️ Card details changed:</span>
+                            Print the updated QR to reflect the latest information.
+                          </div>
+                        )}
+
+                        {/* Manual Regenerate QR Button */}
+                        <button
+                          type="button"
+                          onClick={handleRegenerateQr}
+                          disabled={isQrRegenerating}
+                          className="w-full py-2 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 ${isQrRegenerating ? 'animate-spin' : ''}`} />
+                          <span>{isQrRegenerating ? 'Updating QR...' : 'REGENERATE QR'}</span>
+                        </button>
 
                         {/* Direct Action Buttons: TEST QR and COPY URL */}
                         <div className="flex items-center gap-2 w-full pt-1">

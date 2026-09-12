@@ -23,56 +23,50 @@ import {
   setPrintTarget 
 } from './utils/storage';
 import { generateCardQrCode } from './utils/qrGenerator';
-import { VerificationView } from './views/VerificationView';
+import { VerificationViewer } from './views/VerificationViewer';
 import { PrintWindowView } from './views/PrintWindowView';
 
-export default function App() {
+/**
+ * Parses URL to immediately determine if the user entered Verification Viewer Mode.
+ * Checks hash route (#/verify?d=... or #verify?d=...) and search query params.
+ */
+function parseVerificationRoute(): { isVerification: boolean; encodedData: string } {
+  if (typeof window === 'undefined') {
+    return { isVerification: false, encodedData: '' };
+  }
+  const hash = window.location.hash || '';
+  const search = window.location.search || '';
+
+  // 1. Primary: Hash-based routing #/verify?d=... or #verify?d=...
+  if (hash.startsWith('#/verify') || hash.startsWith('#verify')) {
+    const queryIdx = hash.indexOf('?');
+    const queryString = queryIdx !== -1 ? hash.substring(queryIdx + 1) : '';
+    const params = new URLSearchParams(queryString);
+    const d = params.get('d') || params.get('verify') || params.get('v') || '';
+    return { isVerification: true, encodedData: d };
+  }
+
+  // 2. Query param fallback: ?d=... or ?verify=...
+  const urlParams = new URLSearchParams(search);
+  const dParam = urlParams.get('d') || urlParams.get('verify') || urlParams.get('v');
+  if (dParam !== null && dParam !== undefined) {
+    return { isVerification: true, encodedData: dParam };
+  }
+
+  return { isVerification: false, encodedData: '' };
+}
+
+/**
+ * =========================================================================
+ * STUDIO MODE (SmartIDStudio)
+ * Used exclusively by the card creator to design, edit, and print cards.
+ * =========================================================================
+ */
+export function SmartIDStudio() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
   const [savedDesigns, setSavedDesigns] = useState<SavedCard[]>([]);
   const [calibration, setCalibration] = useState<PrintCalibration>(getPrintCalibration());
-
-  // Parse verification from window.location.hash or search parameters
-  const parseVerificationUrl = () => {
-    if (typeof window === 'undefined') return null;
-    const hash = window.location.hash;
-    const search = window.location.search;
-
-    // 1. Primary: Hash-based routing #/verify?d=... or #verify?d=...
-    if (hash.startsWith('#/verify') || hash.startsWith('#verify')) {
-      const queryString = hash.includes('?') ? hash.substring(hash.indexOf('?') + 1) : '';
-      const params = new URLSearchParams(queryString);
-      const d = params.get('d') || params.get('verify') || params.get('v');
-      const id = params.get('id') || params.get('i');
-      if (d || id) {
-        return { encoded: d || undefined, id: id || undefined };
-      }
-    }
-
-    // 2. Query param fallback: ?d=... or ?verify=...
-    const urlParams = new URLSearchParams(search);
-    const dParam = urlParams.get('d') || urlParams.get('verify') || urlParams.get('v');
-    const idParam = urlParams.get('id') || urlParams.get('i');
-    if (dParam || idParam) {
-      return { encoded: dParam || undefined, id: idParam || undefined };
-    }
-
-    return null;
-  };
-
-  const [verificationPayload, setVerificationPayload] = useState<{ encoded?: string; id?: string } | null>(parseVerificationUrl);
-
-  // Listen for hash changes (e.g. user pastes URL or clicks verification link)
-  useEffect(() => {
-    const handleHashChange = () => {
-      const payload = parseVerificationUrl();
-      if (payload) {
-        setVerificationPayload(payload);
-      }
-    };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
 
   const [isStandalonePrint, setIsStandalonePrint] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -200,6 +194,7 @@ export default function App() {
     } else {
       setPrintTargetCard(cardState);
     }
+
     if (customCal) {
       setCalibration(customCal);
     }
@@ -221,52 +216,30 @@ export default function App() {
       ).then((url) => setPrintQrDataUrl(url)).catch(() => {});
     }
 
-    // If running in sandboxed preview iframe, direct window.print() is blocked by browser security.
-    // Seamlessly open dedicated print window in standalone tab where browser print is guaranteed.
     const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
     if (isInIframe) {
       const base = import.meta.env.BASE_URL || '/';
       const printUrl = `${window.location.origin}${base}?view=print&autoprint=true`;
       window.open(printUrl, '_blank');
-      showToast('Opened Print Window in new tab for direct printing!', 'success');
+      showToast('Opened dedicated print tab for reliable browser printing', 'info');
       return;
     }
 
-    document.body.classList.add('printing-from-app');
-    showToast('Dispatching to printer...', 'info');
-
-    const handleAfterPrint = () => {
-      document.body.classList.remove('printing-from-app');
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-    window.addEventListener('afterprint', handleAfterPrint);
-
-    // Wait for fonts to be ready before calling window.print()
-    const executePrint = async () => {
+    showToast('Opening print dialog...', 'info');
+    setTimeout(() => {
       try {
-        if (document.fonts && document.fonts.ready) {
-          await document.fonts.ready;
-        }
-      } catch {}
-
-      setTimeout(() => {
-        try {
-          window.print();
-        } catch (err) {
-          console.warn('window.print blocked:', err);
-          const printUrl = `${window.location.origin}/?view=print&autoprint=true`;
-          window.open(printUrl, '_blank');
-          showToast('Opened Print Window in new tab', 'info');
-        }
-      }, 250);
-    };
-
-    executePrint();
+        window.print();
+      } catch (e) {
+        console.error('Print failed:', e);
+        showToast('Print dialog failed to open automatically', 'error');
+      }
+    }, 350);
   };
 
-  // Handle bulk print sheet from CSV
+  // Bulk print all CSV records
   const handleBulkPrintAll = (records: any[]) => {
     setBulkPrintRecords(records);
+    setPrintTargetCard(cardState);
     setCalibration((prev) => ({ ...prev, printMode: 'a4' }));
     showToast(`Prepared ${records.length} cards for A4 sheet printing`, 'success');
     setTimeout(() => {
@@ -288,23 +261,6 @@ export default function App() {
     }));
     showToast('Applied Gemini-inspired color palette and styling!', 'success');
   };
-
-  if (verificationPayload) {
-    return (
-      <VerificationView
-        encodedData={verificationPayload.encoded}
-        cardId={verificationPayload.id}
-        onOpenStudio={() => {
-          setVerificationPayload(null);
-          if (typeof window !== 'undefined' && window.history) {
-            const base = import.meta.env.BASE_URL || '/';
-            window.history.replaceState({}, document.title, `${base}#/studio`);
-          }
-          setActiveTab('editor');
-        }}
-      />
-    );
-  }
 
   if (isStandalonePrint) {
     return (
@@ -337,123 +293,123 @@ export default function App() {
           savedCount={savedDesigns.length}
         />
 
-      {/* Main View Display */}
-      <main className="flex-1">
-        {activeTab === 'home' && (
-          <HomeView
-            onNavigate={(tab) => {
-              setActiveTab(tab);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onSelectTemplate={handleSelectTemplate}
-            onOpenAiAssistant={() => setIsAiModalOpen(true)}
-          />
-        )}
+        {/* Main View Display */}
+        <main className="flex-1">
+          {activeTab === 'home' && (
+            <HomeView
+              onNavigate={(tab) => {
+                setActiveTab(tab);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onSelectTemplate={handleSelectTemplate}
+              onOpenAiAssistant={() => setIsAiModalOpen(true)}
+            />
+          )}
 
-        {activeTab === 'editor' && (
-          <EditorView
-            cardState={cardState}
-            onUpdateCardState={setCardState}
-            onOpenPrintModal={() => {
-              setPrintTargetCard(cardState);
-              setIsPrintModalOpen(true);
-            }}
-            onOpenAiAssistant={() => setIsAiModalOpen(true)}
-            onOpenCameraModal={() => setIsCameraModalOpen(true)}
-            onOpenCsvModal={() => setIsCsvModalOpen(true)}
-            onShowToast={showToast}
-            onSavedDesignsChange={refreshSavedDesigns}
-          />
-        )}
+          {activeTab === 'editor' && (
+            <EditorView
+              cardState={cardState}
+              onUpdateCardState={setCardState}
+              onOpenPrintModal={() => {
+                setPrintTargetCard(cardState);
+                setIsPrintModalOpen(true);
+              }}
+              onOpenAiAssistant={() => setIsAiModalOpen(true)}
+              onOpenCameraModal={() => setIsCameraModalOpen(true)}
+              onOpenCsvModal={() => setIsCsvModalOpen(true)}
+              onShowToast={showToast}
+              onSavedDesignsChange={refreshSavedDesigns}
+            />
+          )}
 
-        {activeTab === 'templates' && (
-          <TemplatesView
-            onSelectTemplate={handleSelectTemplate}
-            onDirectPrint={handleDirectPrintFromTemplate}
-            onOpenAiAssistant={() => setIsAiModalOpen(true)}
-          />
-        )}
+          {activeTab === 'templates' && (
+            <TemplatesView
+              onSelectTemplate={handleSelectTemplate}
+              onDirectPrint={handleDirectPrintFromTemplate}
+              onOpenAiAssistant={() => setIsAiModalOpen(true)}
+            />
+          )}
 
-        {activeTab === 'quickprint' && (
-          <QuickPrintView
-            onTriggerBrowserPrint={(target, cal) => handleTriggerBrowserPrint(target, cal)}
-            onOpenEditor={(target) => {
-              setCardState(target);
-              setActiveTab('editor');
-            }}
-            onOpenCsvModal={() => setIsCsvModalOpen(true)}
-            onOpenAiAssistant={() => setIsAiModalOpen(true)}
-            onShowToast={showToast}
-          />
-        )}
+          {activeTab === 'quickprint' && (
+            <QuickPrintView
+              onTriggerBrowserPrint={(target, cal) => handleTriggerBrowserPrint(target, cal)}
+              onOpenEditor={(target) => {
+                setCardState(target);
+                setActiveTab('editor');
+              }}
+              onOpenCsvModal={() => setIsCsvModalOpen(true)}
+              onOpenAiAssistant={() => setIsAiModalOpen(true)}
+              onShowToast={showToast}
+            />
+          )}
 
-        {activeTab === 'mydesigns' && (
-          <MyDesignsView
-            savedDesigns={savedDesigns}
-            onRefreshSavedDesigns={refreshSavedDesigns}
-            onOpenInEditor={handleOpenSavedInEditor}
-            onPrintCard={handlePrintSavedDesign}
-            onCreateNew={() => {
-              setActiveTab('editor');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onShowToast={showToast}
-          />
-        )}
-      </main>
+          {activeTab === 'mydesigns' && (
+            <MyDesignsView
+              savedDesigns={savedDesigns}
+              onRefreshSavedDesigns={refreshSavedDesigns}
+              onOpenInEditor={handleOpenSavedInEditor}
+              onPrintCard={handlePrintSavedDesign}
+              onCreateNew={() => {
+                setActiveTab('editor');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onShowToast={showToast}
+            />
+          )}
+        </main>
 
-      {/* Footer */}
-      <Footer
-        onNavigate={(tab) => {
-          setActiveTab(tab);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-      />
+        {/* Footer */}
+        <Footer
+          onNavigate={(tab) => {
+            setActiveTab(tab);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
 
-      {/* Global Modals */}
-      <PrintPreviewModal
-        isOpen={isPrintModalOpen}
-        onClose={() => setIsPrintModalOpen(false)}
-        cardState={printTargetCard}
-        calibration={calibration}
-        onUpdateCalibration={setCalibration}
-        qrDataUrl={printQrDataUrl}
-        onTriggerBrowserPrint={() => handleTriggerBrowserPrint(printTargetCard, calibration)}
-        onShowToast={showToast}
-      />
+        {/* Global Modals */}
+        <PrintPreviewModal
+          isOpen={isPrintModalOpen}
+          onClose={() => setIsPrintModalOpen(false)}
+          cardState={printTargetCard}
+          calibration={calibration}
+          onUpdateCalibration={setCalibration}
+          qrDataUrl={printQrDataUrl}
+          onTriggerBrowserPrint={() => handleTriggerBrowserPrint(printTargetCard, calibration)}
+          onShowToast={showToast}
+        />
 
-      <CameraCaptureModal
-        isOpen={isCameraModalOpen}
-        onClose={() => setIsCameraModalOpen(false)}
-        onPhotoCaptured={(photoUrl) => {
-          setCardState((prev) => ({ ...prev, photoUrl }));
-          showToast('Photo captured and applied to ID card!', 'success');
-        }}
-      />
+        <CameraCaptureModal
+          isOpen={isCameraModalOpen}
+          onClose={() => setIsCameraModalOpen(false)}
+          onPhotoCaptured={(photoUrl) => {
+            setCardState((prev) => ({ ...prev, photoUrl }));
+            showToast('Photo captured and applied to ID card!', 'success');
+          }}
+        />
 
-      <AiDesignAssistantModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        onApplyTheme={handleApplyAiTheme}
-        currentCategory={TEMPLATES.find((t) => t.id === cardState.templateId)?.category}
-      />
+        <AiDesignAssistantModal
+          isOpen={isAiModalOpen}
+          onClose={() => setIsAiModalOpen(false)}
+          onApplyTheme={handleApplyAiTheme}
+          currentCategory={TEMPLATES.find((t) => t.id === cardState.templateId)?.category}
+        />
 
-      <CsvImportModal
-        isOpen={isCsvModalOpen}
-        onClose={() => setIsCsvModalOpen(false)}
-        onApplyPerson={(person) => {
-          setCardState((prev) => ({
-            ...prev,
-            details: {
-              ...prev.details,
-              ...person,
-            },
-          }));
-          showToast(`Applied ${person.fullName || 'record'} to editor`, 'success');
-          setActiveTab('editor');
-        }}
-        onBulkPrintAll={handleBulkPrintAll}
-      />
+        <CsvImportModal
+          isOpen={isCsvModalOpen}
+          onClose={() => setIsCsvModalOpen(false)}
+          onApplyPerson={(person) => {
+            setCardState((prev) => ({
+              ...prev,
+              details: {
+                ...prev.details,
+                ...person,
+              },
+            }));
+            showToast(`Applied ${person.fullName || 'record'} to editor`, 'success');
+            setActiveTab('editor');
+          }}
+          onBulkPrintAll={handleBulkPrintAll}
+        />
 
         {/* Toast Notification Container */}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -571,4 +527,37 @@ export default function App() {
       </div>
     </>
   );
+}
+
+/**
+ * =========================================================================
+ * ROOT APPLICATION
+ * Enforces two strict mutually-exclusive application modes:
+ * 1. VERIFICATION VIEWER MODE: when URL is #/verify?d=...
+ *    Renders ONLY VerificationViewer, completely bypassing StudioApp layout.
+ * 2. STUDIO MODE: default mode for card creators.
+ * =========================================================================
+ */
+export default function App() {
+  const [route, setRoute] = useState(parseVerificationRoute);
+
+  useEffect(() => {
+    const handleRouteChange = () => {
+      setRoute(parseVerificationRoute());
+    };
+    window.addEventListener('hashchange', handleRouteChange);
+    window.addEventListener('popstate', handleRouteChange);
+    return () => {
+      window.removeEventListener('hashchange', handleRouteChange);
+      window.removeEventListener('popstate', handleRouteChange);
+    };
+  }, []);
+
+  // 1. VERIFICATION VIEWER MODE: Isolated screen for QR code scanners
+  if (route.isVerification) {
+    return <VerificationViewer encodedData={route.encodedData} />;
+  }
+
+  // 2. STUDIO MODE: Full card design and print studio
+  return <SmartIDStudio />;
 }

@@ -2,39 +2,81 @@ import { CardState, ColorScheme, Orientation, PatternType } from '../types';
 import { getTemplateById, getTemplateCardState } from './templateRegistry';
 
 /**
- * Version 3 Compact QR Payload schema
- * Uses short keys to ensure URL stays ultra-compact (< 350 chars)
- * UTF-8 safe, pure frontend-only, zero backend dependency.
+ * Standardized Card Snapshot created directly from the current editor state.
+ * Captures all public identity attributes, template design tokens, and visible fields.
  */
-export interface CompactQrPayloadV3 {
-  v: 3;
+export interface CardSnapshot {
+  version: 4;
+  identity: {
+    id: string;
+    name: string;
+    organization: string;
+    department: string;
+    designation: string;
+    cardType: string;
+    validUntil?: string;
+  };
+  design: {
+    templateId: string;
+    orientation: Orientation;
+    primaryColor: string;
+    secondaryColor: string;
+    accentColor: string;
+    textColor: string;
+    fontFamily: string;
+    headerPreset?: string;
+    footerPreset?: string;
+    pattern?: PatternType;
+    layoutVariant?: string;
+  };
+  visibleFields?: {
+    bloodGroup?: string;
+    phone?: string;
+    emergencyContact?: string;
+    address?: string;
+  };
+}
+
+/**
+ * Version 4 Ultra-Compact QR Payload Schema
+ * Uses short keys to ensure QR code density remains optimal (< 350 chars).
+ * Pure frontend-only, UTF-8 safe, zero backend / database dependency.
+ */
+export interface CompactQrPayloadV4 {
+  v: 4;
   i: string;           // unique ID
   n: string;           // full name
   o?: string;          // organization
   d?: string;          // department
-  r?: string;          // role / designation
-  c?: string;          // card type (e.g., 'Student ID')
+  r?: string;          // designation / role
+  c?: string;          // card type (e.g. 'Student ID', 'Corporate ID')
   e?: string;          // expiry (YYYY-MM-DD or date string)
-  t: string;           // template ID (e.g. 'college-modern-07' / 'coll-poly-07')
+  t: string;           // template ID
   or?: Orientation;    // orientation ('portrait' | 'landscape')
   p: string;           // primary color HEX
   s: string;           // secondary color HEX
   a?: string;          // accent color HEX
-  tx?: string;         // text light / header text HEX
+  tx?: string;         // textColor / textLight HEX
+  fn?: string;         // font family
+  hp?: string;         // header preset ID
+  fp?: string;         // footer preset ID
+  pt?: PatternType;    // pattern
   bg?: string;         // blood group (optional)
   ph?: string;         // phone (optional)
   em?: string;         // emergency contact (optional)
   ad?: string;         // address (optional)
-  hp?: string;         // header preset ID (optional)
-  fp?: string;         // footer preset ID (optional)
-  pt?: PatternType;    // pattern (optional)
-  fn?: string;         // font family (optional)
 }
+
+/**
+ * Backward-compatible V3 interface alias
+ */
+export type CompactQrPayloadV3 = CompactQrPayloadV4;
 
 /**
  * Base URL Resolution:
  * 1. Checks VITE_PUBLIC_SMARTID_URL from environment
- * 2. Falls back to window.location.origin
+ * 2. Falls back to window.location.origin + BASE_URL
+ * 3. Default production URL https://faisaldiddi.me/SmartID
  */
 export function getSmartIdBaseUrl(): string {
   const envUrl = (import.meta as any).env?.VITE_PUBLIC_SMARTID_URL;
@@ -42,7 +84,6 @@ export function getSmartIdBaseUrl(): string {
     return envUrl.trim().replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined') {
-    // If running in browser on localhost without env var, use current origin + BASE_URL
     const base = ((import.meta as any).env?.BASE_URL || '/').replace(/\/+$/, '');
     return `${window.location.origin}${base}`;
   }
@@ -62,8 +103,6 @@ export function isLocalhostWithoutPublicUrl(): boolean {
 
 /**
  * Robust UTF-8 safe Base64URL encoder
- * Properly converts UTF-8 strings into bytes before Base64 encoding.
- * Supports accented letters, Hindi, Arabic, Japanese, emojis, etc.
  */
 export function encodeBase64Url(obj: unknown): string {
   const json = JSON.stringify(obj);
@@ -80,7 +119,6 @@ export function encodeBase64Url(obj: unknown): string {
 
 /**
  * Robust UTF-8 safe Base64URL decoder
- * Restores original Unicode characters without corruption or crashing.
  */
 export function decodeBase64Url<T = any>(value: string): T {
   let base64 = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -97,222 +135,250 @@ export function decodeBase64Url<T = any>(value: string): T {
 }
 
 /**
- * Builds compact V3 verification payload from CardState
- * Strips heavy images, full canvases, or local-only storage pointers.
+ * Builds an authentic snapshot from the CURRENT LIVE card state.
+ * Strictly uses the current card details and never injects demo data.
  */
-export function buildQrPayload(card: CardState): CompactQrPayloadV3 {
-  const tpl = getTemplateById(card.templateId);
+export function buildCardSnapshot(currentCard: CardState): CardSnapshot {
+  const tpl = getTemplateById(currentCard.templateId);
 
-  const payload: CompactQrPayloadV3 = {
-    v: 3,
-    i: (card.details.uniqueId || 'ID-0001').trim(),
-    n: (card.details.fullName || 'Cardholder').trim(),
-    o: card.header.orgName?.trim() || undefined,
-    d: card.details.department?.trim() || undefined,
-    r: card.details.designation?.trim() || undefined,
-    c: tpl.category ? `${tpl.category} ID` : undefined,
-    e: card.details.validUntil?.trim() || undefined,
-    t: card.templateId || tpl.id,
-    or: card.orientation !== tpl.orientation ? card.orientation : undefined,
-    p: card.colors.primary,
-    s: card.colors.secondary,
-    a: card.colors.accent !== tpl.colors.accent ? card.colors.accent : undefined,
-    tx: card.colors.textLight !== '#FFFFFF' ? card.colors.textLight : undefined,
-    bg: card.details.bloodGroup?.trim() || undefined,
-    ph: card.details.phone?.trim() || undefined,
-    em: card.details.emergencyContact?.trim() || undefined,
-    ad: card.details.address?.trim() || undefined,
-    hp: card.header.preset !== tpl.headerPreset ? card.header.preset : undefined,
-    fp: card.footer.preset !== tpl.footerPreset ? card.footer.preset : undefined,
-    pt: card.pattern !== tpl.pattern ? card.pattern : undefined,
-    fn: card.fontFamily !== tpl.fontFamily ? card.fontFamily : undefined,
+  const identity = {
+    id: (currentCard.details.uniqueId || '').trim(),
+    name: (currentCard.details.fullName || '').trim(),
+    organization: (currentCard.header.orgName || '').trim(),
+    department: (currentCard.details.department || '').trim(),
+    designation: (currentCard.details.designation || '').trim(),
+    cardType: (currentCard.customTemplateName || tpl.name || 'SmartID').trim(),
+    validUntil: currentCard.details.showValidity && currentCard.details.validUntil
+      ? currentCard.details.validUntil.trim()
+      : undefined,
+  };
+
+  const design = {
+    templateId: currentCard.templateId || tpl.id,
+    orientation: currentCard.orientation || tpl.orientation,
+    primaryColor: currentCard.colors.primary,
+    secondaryColor: currentCard.colors.secondary,
+    accentColor: currentCard.colors.accent,
+    textColor: currentCard.colors.textLight || '#FFFFFF',
+    fontFamily: currentCard.fontFamily || tpl.fontFamily,
+    headerPreset: currentCard.header.preset || tpl.headerPreset,
+    footerPreset: currentCard.footer.preset || tpl.footerPreset,
+    pattern: currentCard.pattern || tpl.pattern,
+    layoutVariant: tpl.layoutVariant,
+  };
+
+  const visibleFields: NonNullable<CardSnapshot['visibleFields']> = {};
+  if (currentCard.details.showBloodGroup && currentCard.details.bloodGroup) {
+    visibleFields.bloodGroup = currentCard.details.bloodGroup.trim();
+  }
+  if (currentCard.details.showPhone && currentCard.details.phone) {
+    visibleFields.phone = currentCard.details.phone.trim();
+  }
+  if (currentCard.details.showEmergencyContact && currentCard.details.emergencyContact) {
+    visibleFields.emergencyContact = currentCard.details.emergencyContact.trim();
+  }
+  if (currentCard.details.showAddress && currentCard.details.address) {
+    visibleFields.address = currentCard.details.address.trim();
+  }
+
+  return {
+    version: 4,
+    identity,
+    design,
+    visibleFields: Object.keys(visibleFields).length > 0 ? visibleFields : undefined,
+  };
+}
+
+/**
+ * Converts a CardSnapshot into the compact QR payload format
+ */
+export function buildCompactPayloadFromSnapshot(snapshot: CardSnapshot): CompactQrPayloadV4 {
+  const tpl = getTemplateById(snapshot.design.templateId);
+
+  const payload: CompactQrPayloadV4 = {
+    v: 4,
+    i: snapshot.identity.id,
+    n: snapshot.identity.name,
+    o: snapshot.identity.organization || undefined,
+    d: snapshot.identity.department || undefined,
+    r: snapshot.identity.designation || undefined,
+    c: snapshot.identity.cardType || undefined,
+    e: snapshot.identity.validUntil || undefined,
+    t: snapshot.design.templateId,
+    or: snapshot.design.orientation !== tpl.orientation ? snapshot.design.orientation : undefined,
+    p: snapshot.design.primaryColor,
+    s: snapshot.design.secondaryColor,
+    a: snapshot.design.accentColor !== tpl.colors.accent ? snapshot.design.accentColor : undefined,
+    tx: snapshot.design.textColor !== '#FFFFFF' ? snapshot.design.textColor : undefined,
+    fn: snapshot.design.fontFamily !== tpl.fontFamily ? snapshot.design.fontFamily : undefined,
+    hp: snapshot.design.headerPreset !== tpl.headerPreset ? snapshot.design.headerPreset : undefined,
+    fp: snapshot.design.footerPreset !== tpl.footerPreset ? snapshot.design.footerPreset : undefined,
+    pt: snapshot.design.pattern !== tpl.pattern ? snapshot.design.pattern : undefined,
+    bg: snapshot.visibleFields?.bloodGroup,
+    ph: snapshot.visibleFields?.phone,
+    em: snapshot.visibleFields?.emergencyContact,
+    ad: snapshot.visibleFields?.address,
   };
 
   return payload;
 }
 
 /**
- * Encodes payload into URL-safe string
+ * Encodes CardSnapshot into compact URL-safe Base64 string
  */
-export function encodeQrPayload(payload: CompactQrPayloadV3): string {
-  return encodeBase64Url(payload);
+export function buildVerificationPayload(snapshot: CardSnapshot): string {
+  const compact = buildCompactPayloadFromSnapshot(snapshot);
+  return encodeBase64Url(compact);
 }
 
 /**
- * Decodes URL-safe string back into CompactQrPayloadV3 or legacy payload
+ * Legacy wrapper: builds payload from CardState
  */
+export function buildQrPayload(card: CardState): CompactQrPayloadV4 {
+  const snapshot = buildCardSnapshot(card);
+  return buildCompactPayloadFromSnapshot(snapshot);
+}
+
+export function encodeQrPayload(payload: CompactQrPayloadV4): string {
+  return encodeBase64Url(payload);
+}
+
 export function decodeQrPayload(encoded: string): any {
   return decodeBase64Url(encoded);
 }
 
 /**
- * Builds the canonical QR verification URL
- * Format: https://DOMAIN/#/verify?d=PAYLOAD
+ * Canonical URL Generator:
+ * Takes the current CardState, builds an instant snapshot, and creates the verification URL.
  */
 export function buildQrVerificationUrl(card: CardState): string {
   const baseUrl = getSmartIdBaseUrl();
-  const payload = buildQrPayload(card);
-  const encoded = encodeQrPayload(payload);
+  const snapshot = buildCardSnapshot(card);
+  const encoded = buildVerificationPayload(snapshot);
   const verificationUrl = `${baseUrl}/#/verify?d=${encoded}`;
 
   if (process.env.NODE_ENV !== 'production' || typeof window !== 'undefined') {
-    console.log('[SmartID QR] Generated Verification URL:', verificationUrl);
-    console.log('[SmartID QR] URL Length:', verificationUrl.length, 'chars');
-    console.log('[SmartID QR] Template ID:', payload.t);
+    console.log('[SmartID QR] Snapshot ID:', snapshot.identity.id, '| Name:', snapshot.identity.name);
+    console.log('[SmartID QR] Generated URL:', verificationUrl);
   }
 
   return verificationUrl;
 }
 
 /**
- * Restores a full authentic CardState from the verification payload
- * Supports:
- * - V3 payload (v: 3, short keys: i, n, o, d, r, e, t, p, s, a, tx...)
- * - V2 payload fallback
- * - V1 payload fallback
- * NEVER replaces the card with a generic SmartID card.
+ * Restores authentic CardState from URL-safe verification payload.
+ * Strictly uses payload attributes and never loads demo data fallbacks.
+ * Returns { card: null, status: 'INVALID' } if payload cannot be decoded.
  */
-export function restoreCardFromPayload(encodedData: string): { card: CardState; status: 'VALID' | 'EXPIRED' | 'INVALID'; reason?: string } {
+export function restoreCardFromPayload(encodedData: string): {
+  card: CardState | null;
+  status: 'VALID' | 'EXPIRED' | 'INVALID';
+  reason?: string;
+} {
   try {
     if (!encodedData || typeof encodedData !== 'string' || encodedData.trim() === '' || encodedData === 'plain') {
-      return { card: null as any, status: 'INVALID', reason: 'Missing payload data' };
+      return { card: null, status: 'INVALID', reason: 'Missing QR payload data' };
     }
 
-    const parsed = decodeQrPayload(encodedData);
+    const parsed = decodeBase64Url(encodedData);
     if (!parsed || typeof parsed !== 'object') {
-      return { card: null as any, status: 'INVALID', reason: 'Malformed payload' };
+      return { card: null, status: 'INVALID', reason: 'Malformed payload data' };
     }
 
-    // 1. Handle V3 Payload (Canonical SmartID format)
-    if (parsed.v === 3 || (parsed.i && parsed.n && parsed.t)) {
-      const p = parsed as CompactQrPayloadV3;
-      const tpl = getTemplateById(p.t);
-      const baseState = getTemplateCardState(tpl);
+    // Identify template ID
+    const templateId = parsed.t || parsed.tpl || parsed.templateId;
+    if (!templateId) {
+      return { card: null, status: 'INVALID', reason: 'Missing template identifier in QR payload' };
+    }
 
-      const colors: ColorScheme = {
-        primary: p.p || baseState.colors.primary,
-        secondary: p.s || baseState.colors.secondary,
-        accent: p.a || baseState.colors.accent,
-        background: baseState.colors.background,
-        textDark: baseState.colors.textDark,
-        textLight: p.tx || baseState.colors.textLight,
-        headerBg: p.p || baseState.colors.headerBg,
-        footerBg: p.s || baseState.colors.footerBg,
-      };
+    const tpl = getTemplateById(templateId);
+    const baseState = getTemplateCardState(tpl);
 
-      const restored: CardState = {
-        ...baseState,
-        templateId: tpl.id,
-        customTemplateName: tpl.name,
-        orientation: p.or || tpl.orientation,
-        colors,
-        pattern: p.pt || tpl.pattern,
-        fontFamily: p.fn || tpl.fontFamily,
-        header: {
-          ...baseState.header,
-          orgName: p.o || baseState.header.orgName,
-          preset: p.hp || baseState.header.preset,
-          bgColor: colors.headerBg,
-        },
-        footer: {
-          ...baseState.footer,
-          preset: p.fp || baseState.footer.preset,
-          bgColor: colors.footerBg,
-        },
-        details: {
-          ...baseState.details,
-          fullName: p.n || baseState.details.fullName,
-          uniqueId: p.i || baseState.details.uniqueId,
-          department: p.d || baseState.details.department,
-          designation: p.r || baseState.details.designation,
-          validUntil: p.e || baseState.details.validUntil,
-          bloodGroup: p.bg || baseState.details.bloodGroup,
-          phone: p.ph || baseState.details.phone,
-          emergencyContact: p.em || baseState.details.emergencyContact,
-          address: p.ad || baseState.details.address,
-          showBloodGroup: !!p.bg,
-          showPhone: !!p.ph,
-          showEmergencyContact: !!p.em,
-          showAddress: !!p.ad,
-          showValidity: !!p.e,
-        },
-      };
+    // Extract exact values from payload (v4, v3 or legacy v2)
+    const uniqueId = parsed.i || parsed.id || '';
+    const fullName = parsed.n || parsed.name || '';
+    const organization = parsed.o || parsed.org || '';
+    const department = parsed.d || parsed.dept || '';
+    const designation = parsed.r || parsed.role || '';
+    const validUntil = parsed.e || parsed.exp || parsed.validUntil || '';
+    const cardType = parsed.c || parsed.cardType || tpl.name;
 
-      // Check Expiry
-      let status: 'VALID' | 'EXPIRED' | 'INVALID' = 'VALID';
-      if (p.e) {
-        const expDate = new Date(p.e);
-        if (!isNaN(expDate.getTime())) {
-          const now = new Date();
-          now.setHours(0, 0, 0, 0);
-          if (expDate < now) {
-            status = 'EXPIRED';
-          }
+    const primaryColor = parsed.p || parsed.c?.[0] || parsed.theme?.primary || baseState.colors.primary;
+    const secondaryColor = parsed.s || parsed.c?.[1] || parsed.theme?.secondary || baseState.colors.secondary;
+    const accentColor = parsed.a || parsed.c?.[2] || parsed.theme?.accent || baseState.colors.accent;
+    const textLight = parsed.tx || baseState.colors.textLight;
+
+    const colors: ColorScheme = {
+      primary: primaryColor,
+      secondary: secondaryColor,
+      accent: accentColor,
+      background: baseState.colors.background,
+      textDark: baseState.colors.textDark,
+      textLight: textLight,
+      headerBg: primaryColor,
+      footerBg: secondaryColor,
+    };
+
+    // Construct authentic CardState. NO hardcoded demo person identity values!
+    const restored: CardState = {
+      ...baseState,
+      templateId: tpl.id,
+      customTemplateName: cardType,
+      orientation: parsed.or || parsed.ori || parsed.orientation || tpl.orientation,
+      colors,
+      pattern: parsed.pt || parsed.p || parsed.theme?.pattern || tpl.pattern,
+      fontFamily: parsed.fn || parsed.c?.[3] || parsed.theme?.font || tpl.fontFamily,
+      photoUrl: '', // Avatar initials are displayed; large photo base64 is deliberately omitted from QR
+      header: {
+        ...baseState.header,
+        orgName: organization,
+        preset: parsed.hp || baseState.header.preset,
+        bgColor: colors.headerBg,
+      },
+      footer: {
+        ...baseState.footer,
+        preset: parsed.fp || baseState.footer.preset,
+        bgColor: colors.footerBg,
+      },
+      details: {
+        ...baseState.details,
+        fullName: fullName,
+        uniqueId: uniqueId,
+        department: department,
+        designation: designation,
+        validUntil: validUntil,
+        bloodGroup: parsed.bg || '',
+        phone: parsed.ph || '',
+        emergencyContact: parsed.em || '',
+        address: parsed.ad || '',
+        showBloodGroup: !!parsed.bg,
+        showPhone: !!parsed.ph,
+        showEmergencyContact: !!parsed.em,
+        showAddress: !!parsed.ad,
+        showValidity: !!validUntil,
+        showDepartment: !!department,
+        showDesignation: !!designation,
+      },
+    };
+
+    // Calculate status: VALID or EXPIRED
+    let status: 'VALID' | 'EXPIRED' | 'INVALID' = 'VALID';
+    if (validUntil) {
+      const expDate = new Date(validUntil);
+      if (!isNaN(expDate.getTime())) {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        if (expDate < now) {
+          status = 'EXPIRED';
         }
       }
-
-      return { card: restored, status };
     }
 
-    // 2. Handle Legacy V2 Payload
-    if (parsed.v === 2 || parsed.tpl || parsed.templateId) {
-      const p = parsed as any;
-      const tplId = p.tpl || p.templateId || 'coll-poly-07';
-      const tpl = getTemplateById(tplId);
-      const baseState = getTemplateCardState(tpl);
-
-      const primaryColor = p.c?.[0] || p.theme?.primary || baseState.colors.primary;
-      const secondaryColor = p.c?.[1] || p.theme?.secondary || baseState.colors.secondary;
-      const accentColor = p.c?.[2] || p.theme?.accent || baseState.colors.accent;
-
-      const colors: ColorScheme = {
-        primary: primaryColor,
-        secondary: secondaryColor,
-        accent: accentColor,
-        background: baseState.colors.background,
-        textDark: baseState.colors.textDark,
-        textLight: baseState.colors.textLight,
-        headerBg: primaryColor,
-        footerBg: secondaryColor,
-      };
-
-      const restored: CardState = {
-        ...baseState,
-        templateId: tpl.id,
-        customTemplateName: tpl.name,
-        orientation: p.ori || p.orientation || tpl.orientation,
-        colors,
-        pattern: p.p || p.theme?.pattern || tpl.pattern,
-        fontFamily: p.c?.[3] || p.theme?.font || tpl.fontFamily,
-        header: {
-          ...baseState.header,
-          orgName: p.org || baseState.header.orgName,
-          bgColor: colors.headerBg,
-        },
-        footer: {
-          ...baseState.footer,
-          bgColor: colors.footerBg,
-        },
-        details: {
-          ...baseState.details,
-          fullName: p.name || baseState.details.fullName,
-          uniqueId: p.id || baseState.details.uniqueId,
-          department: p.dept || baseState.details.department,
-          designation: p.role || baseState.details.designation,
-          validUntil: p.exp || p.validUntil || baseState.details.validUntil,
-        },
-      };
-
-      return { card: restored, status: 'VALID' };
-    }
-
-    return { card: null as any, status: 'INVALID', reason: 'Unsupported QR payload version' };
+    return { card: restored, status };
   } catch (err: any) {
-    console.error('[SmartID QR] Failed to decode payload:', err);
-    return { card: null as any, status: 'INVALID', reason: err?.message || 'Decode error' };
+    console.error('[SmartID QR] Failed to decode verification payload:', err);
+    return { card: null, status: 'INVALID', reason: err?.message || 'Decode error' };
   }
 }
 
-// Backward compatibility alias
-export const buildVerificationPayload = (card: CardState) => encodeQrPayload(buildQrPayload(card));
 export const buildVerificationUrl = buildQrVerificationUrl;

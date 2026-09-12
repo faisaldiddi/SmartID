@@ -1,0 +1,6 @@
+{
+  "name": "SmartID",
+  "description": "Professional browser-based ID Card Generator and Instant Printing Studio with 50+ templates, custom designer, QR code generator, and instant CR80 & A4 printing.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

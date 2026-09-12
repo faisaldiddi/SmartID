@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --brand-dark-green: #1D3527;
+    --brand-primary: #2C4F3A;
+    --brand-medium-green: #52745D;
+    --brand-very-light-cream: #FBF9F2;
+    --brand-light-cream: #F4F0E4;
+    --brand-cream: #DFD9C4;
+    --brand-border: #D4CEBA;
+    --brand-dark-text: #1F2D24;
+    --brand-secondary-text: #59645C;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--brand-very-light-cream);
+    color: var(--brand-dark-text);
+  }
+}
+
+/* Print Specific Rules */
+@media print {
+  @page {
+    size: auto;
+    margin: 0mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  .smartid-print-card {
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin: 0 auto !important;
+  }
+
+  /* Force exact colors, backgrounds, gradients, and images across entire print output */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Hide web chrome, screen layout, navigation, modals, and screen-only elements */
+  .screen-layout,
+  .no-print,
+  .print-hidden,
+  .smartid-nav,
+  .site-header,
+  .site-footer,
+  .toast-container,
+  div[role="dialog"],
+  .fixed.inset-0,
+  .verify-screen-only,
+  .screen-only {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Show the designated print area reliably in normal document flow */
+  #print-only-container,
+  .print-only-container {
+    display: block !important;
+    visibility: visible !important;
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    opacity: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    z-index: auto !important;
+  }
+
+  /* Standalone print window view styling */
+  .standalone-print-surface {
+    display: block !important;
+    visibility: visible !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .print-card-page {
+    display: block !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Remove shadow from cards in print */
+  [id^="print-"],
+  [id^="verify-card-"],
+  .card-container {
+    box-shadow: none !important;
+  }
+}
+
+/* Offscreen pre-rendered print container on screen so all images, fonts, and SVGs are decoded */
+@media screen {
+  .print-only-container,
+  #print-only-container {
+    position: fixed !important;
+    left: -99999px !important;
+    top: 0 !important;
+    width: 85.6mm !important;
+    height: auto !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    z-index: -9999 !important;
+    overflow: hidden !important;
+  }
+}
+
+/* Custom scrollbar for editing panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F4F0E4;
+}
+::-webkit-scrollbar-thumb {
+  background: #D4CEBA;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52745D;
+}

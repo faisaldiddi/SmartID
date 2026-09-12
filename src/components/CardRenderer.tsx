@@ -22,6 +22,7 @@ import { getTemplateById, renderModelToCardState } from '../utils/templateRegist
 
 export interface CardRendererProps {
   cardState?: CardState;
+  snapshot?: any;
   model?: CardRenderModel;
   side?: CardSide;
   scale?: number; // visual scale factor for screen (1 = normal ~432px base width)
@@ -31,6 +32,7 @@ export interface CardRendererProps {
   id?: string;
   onClick?: () => void;
   isPrint?: boolean; // When true, renders with physical mm dimensions (85.6mm x 53.98mm)
+  mode?: 'edit' | 'readonly';
 }
 
 /**
@@ -72,6 +74,7 @@ function getInitials(name: string): string {
 
 export const CardRenderer: React.FC<CardRendererProps> = ({
   cardState: rawCardState,
+  snapshot,
   model,
   side = 'front',
   scale = 1,
@@ -81,6 +84,7 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
   id,
   onClick,
   isPrint = false,
+  mode = 'edit',
 }) => {
   // Single canonical CardState source
   const cardState = useMemo(() => {
@@ -90,9 +94,12 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
     if (rawCardState) {
       return rawCardState;
     }
+    if (snapshot) {
+      return snapshot;
+    }
     // Fallback template
     return renderModelToCardState({} as any);
-  }, [model, rawCardState]);
+  }, [model, rawCardState, snapshot]);
 
   const {
     templateId,
@@ -394,6 +401,25 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                     </span>
                   </div>
                 )}
+
+                {details.showAddress && details.address && (
+                  <div className="col-span-2">
+                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">Address / Location</span>
+                    <span className="font-semibold block leading-tight break-words" style={{ color: colors.textDark }}>
+                      {details.address}
+                    </span>
+                  </div>
+                )}
+
+                {/* Custom Fields (e.g. Aadhaar, Ward, Location) */}
+                {details.customFields && details.customFields.filter((f) => f.enabled && f.value).map((f) => (
+                  <div key={f.id} className="col-span-2">
+                    <span className="text-[7px] uppercase font-bold text-stone-400 block leading-none">{f.label}</span>
+                    <span className="font-semibold block leading-tight break-words" style={{ color: colors.textDark }}>
+                      {f.value}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -583,6 +609,25 @@ export const CardRenderer: React.FC<CardRendererProps> = ({
                 </span>
               </div>
             )}
+
+            {details.showAddress && details.address && (
+              <div className="flex justify-between items-center">
+                <span className="text-[7px] font-bold uppercase text-stone-400">Location:</span>
+                <span className="font-semibold truncate max-w-[140px]" style={{ color: colors.textDark }}>
+                  {details.address}
+                </span>
+              </div>
+            )}
+
+            {/* Custom Fields (e.g. Aadhaar, Ward, Location) */}
+            {details.customFields && details.customFields.filter((f) => f.enabled && f.value).map((f) => (
+              <div key={f.id} className="flex justify-between items-center">
+                <span className="text-[7px] font-bold uppercase text-stone-400">{f.label}:</span>
+                <span className="font-semibold truncate max-w-[140px]" style={{ color: colors.textDark }}>
+                  {f.value}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 

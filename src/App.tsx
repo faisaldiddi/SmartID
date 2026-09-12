@@ -23,7 +23,7 @@ import {
   setPrintTarget 
 } from './utils/storage';
 import { generateCardQrCode } from './utils/qrGenerator';
-import { VerificationViewer } from './views/VerificationViewer';
+import { QrCardViewer } from './views/QrCardViewer';
 import { PrintWindowView } from './views/PrintWindowView';
 
 /**
@@ -553,9 +553,9 @@ export default function App() {
     };
   }, []);
 
-  // 1. VERIFICATION VIEWER MODE: Isolated screen for QR code scanners
+  // 1. READ-ONLY QR CARD VIEWER MODE: Isolated Card Preview for QR code scanners
   if (route.isVerification) {
-    return <VerificationViewer encodedData={route.encodedData} />;
+    return <QrCardViewer encodedData={route.encodedData} />;
   }
 
   // 2. STUDIO MODE: Full card design and print studio

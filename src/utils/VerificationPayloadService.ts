@@ -35,6 +35,7 @@ export interface CardSnapshot {
     emergencyContact?: string;
     address?: string;
   };
+  customFields?: Array<{ id: string; label: string; value: string }>;
 }
 
 /**
@@ -65,6 +66,7 @@ export interface CompactQrPayloadV4 {
   ph?: string;         // phone (optional)
   em?: string;         // emergency contact (optional)
   ad?: string;         // address (optional)
+  cf?: Array<{ l: string; v: string }>; // compact custom fields (optional)
 }
 
 /**
@@ -181,11 +183,16 @@ export function buildCardSnapshot(currentCard: CardState): CardSnapshot {
     visibleFields.address = currentCard.details.address.trim();
   }
 
+  const customFields = currentCard.details.customFields
+    ?.filter((f) => f.enabled && f.value)
+    .map((f) => ({ id: f.id, label: f.label, value: f.value }));
+
   return {
     version: 4,
     identity,
     design,
     visibleFields: Object.keys(visibleFields).length > 0 ? visibleFields : undefined,
+    customFields: customFields && customFields.length > 0 ? customFields : undefined,
   };
 }
 
@@ -218,6 +225,7 @@ export function buildCompactPayloadFromSnapshot(snapshot: CardSnapshot): Compact
     ph: snapshot.visibleFields?.phone,
     em: snapshot.visibleFields?.emergencyContact,
     ad: snapshot.visibleFields?.address,
+    cf: snapshot.customFields?.map((f) => ({ l: f.label, v: f.value })),
   };
 
   return payload;
@@ -358,6 +366,14 @@ export function restoreCardFromPayload(encodedData: string): {
         showValidity: !!validUntil,
         showDepartment: !!department,
         showDesignation: !!designation,
+        customFields: parsed.cf
+          ? parsed.cf.map((f: any, idx: number) => ({
+              id: `cf_${idx}`,
+              label: f.l,
+              value: f.v,
+              enabled: true,
+            }))
+          : (baseState.details.customFields || []),
       },
     };
 
